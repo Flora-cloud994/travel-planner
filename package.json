@@ -7,8 +7,8 @@
     "node": ">=18"
   },
   "scripts": {
-    "sync": "node sync-index.js",
-    "check": "node sync-index.js --check",
+    "sync": "node sync-index.cjs",
+    "check": "node sync-index.cjs --check",
     "dev": "vercel dev",
     "deploy": "vercel --prod"
   },

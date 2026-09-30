@@ -1,9 +1,9 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "version": 2,
-  "buildCommand": "node sync-index.js",
+  "buildCommand": "node sync-index.cjs",
   "functions": {
-    "api/proxy.js": {
+    "api/proxy.mjs": {
       "memory": 512,
       "maxDuration": 60
     }

@@ -24,7 +24,7 @@
 浏览器（travel-planner.html，零 Key）
         │  POST /api/proxy   { type, ... }
         ▼
-Vercel Serverless（api/proxy.js，持有 Key）
+Vercel Serverless（api/proxy.mjs，持有 Key）
         │
         ├── type=qwen-text   → DashScope  /compatible-mode/v1/chat/completions
         ├── type=qwen-image  → DashScope  /compatible-mode/v1/chat/completions
@@ -80,7 +80,7 @@ git push -u origin main
 ### 3. 在 Vercel 导入项目
 
 1. 登录 [vercel.com](https://vercel.com) → **Add New… → Project** → 选择上面的仓库；
-2. **Framework Preset** 选 `Other`（本项目的根目录 `travel-planner.html` 会作为静态页面自动部署，`api/proxy.js` 自动识别为 Serverless 函数）；
+2. **Framework Preset** 选 `Other`（本项目的根目录 `travel-planner.html` 会作为静态页面自动部署，`api/proxy.mjs` 自动识别为 Serverless 函数）；
 3. 展开 **Environment Variables**，添加：
    - `DASHSCOPE_KEY` = 你的千问 Key（必填）
    - `AMAP_KEY` = 你的高德 Web 服务 Key（必填）
@@ -113,7 +113,7 @@ npm run dev          # 启动 vercel dev，默认 http://localhost:3000
 
 ```
 ├── api/
-│   └── proxy.js          # Serverless 代理：四种 type 转发，Key 从环境变量读取
+│   └── proxy.mjs          # Serverless 代理：四种 type 转发，Key 从环境变量读取
 ├── data/
 │   ├── data-coords.js    # 坐标修正表
 │   ├── data-yn.js        # 云南城市 POI 数据
@@ -122,7 +122,7 @@ npm run dev          # 启动 vercel dev，默认 http://localhost:3000
 │   └── data-hotels.js    # 住宿数据
 ├── travel-planner.html   # 单文件前端（含全部 UI / 逻辑 / 样式）——★ 主文件，改这里
 ├── index.html            # 由 travel-planner.html 自动同步生成（勿手改）
-├── sync-index.js         # 同步脚本（部署时自动运行）
+├── sync-index.cjs         # 同步脚本（部署时自动运行）
 ├── vercel.json           # Serverless 函数 + 构建命令配置
 ├── package.json
 ├── .env.example          # 环境变量清单（不含值）
@@ -137,7 +137,7 @@ npm run dev          # 启动 vercel dev，默认 http://localhost:3000
 
 - 前端**不含任何 API Key**（千问 / 高德 / 腾讯三个 Key 全部在服务端），也不提供 Key 输入框；Key 只存在于 Vercel 环境变量与已 gitignore 的本地 `.env`。
 - 建议在 DashScope、高德、腾讯位置服务控制台分别设置**每日调用上限 / 流量限制**，防止 Key 被滥用。
-- 如需限制使用范围，可在 `api/proxy.js` 的 `setCors` 中把 `Access-Control-Allow-Origin` 由 `*` 改为你的域名。
+- 如需限制使用范围，可在 `api/proxy.mjs` 的 `setCors` 中把 `Access-Control-Allow-Origin` 由 `*` 改为你的域名。
 
 ---
 
@@ -153,4 +153,4 @@ npm run dev          # 启动 vercel dev，默认 http://localhost:3000
 Key 的服务平台类型不对，需重新申请「Web服务」类型的 Key。
 
 **Q：`maxDuration` 想调更大？**
-改 `vercel.json` 中 `api/proxy.js` 的 `maxDuration`（Hobby 计划上限 60 秒）。
+改 `vercel.json` 中 `api/proxy.mjs` 的 `maxDuration`（Hobby 计划上限 60 秒）。
