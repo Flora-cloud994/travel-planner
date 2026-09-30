@@ -39,7 +39,7 @@ if (checkOnly) {
     console.log("[sync-index] ✅ index.html 与 travel-planner.html 一致");
     process.exit(0);
   }
-  console.error("[sync-index] ❌ index.html 与 travel-planner.html 不一致，请运行：node sync-index.js");
+  console.error("[sync-index] ❌ index.html 与 travel-planner.html 不一致，请运行：node sync-index.cjs");
   process.exit(1);
 }
 
