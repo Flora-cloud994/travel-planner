@@ -63,9 +63,8 @@ function validate(type) {
     return { ok: true };
   }
   if (type === "tmap-search") {
-    if (!process.env.TMAP_KEY) {
-      return { ok: false, status: 500, obj: { error: { message: "服务端未配置 TMAP_KEY" } } };
-    }
+    /* 腾讯通道是**可选的**：不配 TMAP_KEY 时不报错，由 forwardTmap 返回空结果，
+       前端「到达点搜索」自然无结果，但页面不会崩。 */
     return { ok: true };
   }
   return { ok: false, status: 400, obj: { error: { message: "未知的 type：" + type } } };
@@ -116,8 +115,13 @@ async function forwardAmap(payload, res) {
   res.end(text);
 }
 
-/* ---------------- 腾讯地图转发（到达点搜索，参数走白名单） ---------------- */
+/* ---------------- 腾讯地图转发（到达点搜索，参数走白名单；可选通道） ----------------
+   未配置 TMAP_KEY 时**不报错**，直接返回一个空结果集（status:0 + 无 data），
+   前端「到达点搜索」表现为「未找到」而不是页面报错。 */
 async function forwardTmap(payload, res) {
+  if (!process.env.TMAP_KEY) {
+    return json(res, 200, { status: 0, message: "服务端未配置 TMAP_KEY（腾讯通道已停用）", data: [] });
+  }
   /* params 是前端拼好的查询串（keyword=…&boundary=…）；这里逐项过滤，
      只保留白名单内的键，并重新编码，避免被塞入 &key= 之类做参数注入。 */
   const raw = String((payload && payload.params) || "");

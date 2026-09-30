@@ -54,13 +54,15 @@ Vercel Serverless（api/proxy.js，持有 Key）
 
 ### 1. 准备两个 Key
 
-| 环境变量 | 用途 | 申请地址 |
-| --- | --- | --- |
-| `DASHSCOPE_KEY` | 千问识别（文本 + 视觉） | 阿里云百炼控制台 → **API-KEY 管理** |
-| `AMAP_KEY` | 高德地点搜索 / 路线规划 | 高德开放平台 → 应用管理 → 添加 Key，**服务平台必须选「Web服务」** |
-| `TMAP_KEY` | 腾讯地图「到达点搜索」 | 腾讯位置服务 → 应用管理 → 添加 Key，勾选 **WebService API** |
+| 环境变量 | 用途 | 是否必填 | 申请地址 |
+| --- | --- | --- | --- |
+| `DASHSCOPE_KEY` | 千问识别（文本 + 视觉） | **必填** | 阿里云百炼控制台 → **API-KEY 管理** |
+| `AMAP_KEY` | 高德地点搜索 / 路线规划 | **必填** | 高德开放平台 → 应用管理 → 添加 Key，**服务平台必须选「Web服务」** |
+| `TMAP_KEY` | 腾讯地图「到达点搜索」 | 可选 | 腾讯位置服务 → 应用管理 → 添加 Key，勾选 **WebService API** |
 
 > 高德 Key 若选成「Web端(JS API)」，服务端调用会报 `USERKEY_PLAT_NOMATCH`。
+>
+> **`TMAP_KEY` 可以不填**：不填时「到达点搜索」搜不到结果，接驳方案退化为按坐标距离估算（费用与时间仍正常显示），其余功能不受影响。
 
 ### 2. 推到 GitHub
 
@@ -79,10 +81,10 @@ git push -u origin main
 
 1. 登录 [vercel.com](https://vercel.com) → **Add New… → Project** → 选择上面的仓库；
 2. **Framework Preset** 选 `Other`（本项目的根目录 `travel-planner.html` 会作为静态页面自动部署，`api/proxy.js` 自动识别为 Serverless 函数）；
-3. 展开 **Environment Variables**，添加三条：
-   - `DASHSCOPE_KEY` = 你的千问 Key
-   - `AMAP_KEY` = 你的高德 Web 服务 Key
-   - `TMAP_KEY` = 你的腾讯位置服务 Key
+3. 展开 **Environment Variables**，添加：
+   - `DASHSCOPE_KEY` = 你的千问 Key（必填）
+   - `AMAP_KEY` = 你的高德 Web 服务 Key（必填）
+   - `TMAP_KEY` = 你的腾讯位置服务 Key（**可选**，不填则「到达点搜索」不可用）
 4. 点 **Deploy**，等待完成。
 
 部署完成后拿到形如 `https://xxx.vercel.app` 的地址，直接分享给任何人即可使用。
