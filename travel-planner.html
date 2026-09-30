@@ -500,6 +500,26 @@ mark.hl{background:rgba(224,168,0,.28);color:inherit;border-radius:3px;padding:0
 .ai-drop img{max-width:100%;max-height:158px;border-radius:8px;box-shadow:var(--shadow-sm,0 2px 8px rgba(0,0,0,.08))}
 .ai-drop .rm{position:absolute;top:7px;right:9px;border:none;background:rgba(20,24,32,.6);color:#fff;width:22px;height:22px;
   border-radius:50%;cursor:pointer;font-size:12px;line-height:1}
+/* v14.0 多图上传：缩略图网格（上限 3 张） */
+.ai-thumbs{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;width:100%}
+.ai-thumb{position:relative;border-radius:8px;overflow:hidden;background:var(--bg);aspect-ratio:4/3;
+  box-shadow:var(--shadow-sm,0 2px 8px rgba(0,0,0,.08))}
+.ai-thumb img{width:100%;height:100%;object-fit:cover;display:block}
+.ai-thumb .rm{position:absolute;top:4px;right:4px;border:none;background:rgba(20,24,32,.62);color:#fff;width:20px;height:20px;
+  border-radius:50%;cursor:pointer;font-size:11px;line-height:1;padding:0;z-index:2}
+.ai-thumb .rm:hover{background:rgba(220,38,38,.9)}
+.ai-thumb .meta{position:absolute;left:0;right:0;bottom:0;background:linear-gradient(transparent,rgba(0,0,0,.62));
+  color:#fff;font-size:9.5px;padding:10px 5px 3px;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ai-thumb .idx{position:absolute;top:4px;left:4px;background:rgba(139,92,246,.92);color:#fff;font-size:9.5px;
+  min-width:15px;height:15px;line-height:15px;text-align:center;border-radius:4px;padding:0 3px;font-weight:600;z-index:2}
+.ai-thumb-add{border:2px dashed var(--line);border-radius:8px;background:transparent;cursor:pointer;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;aspect-ratio:4/3;
+  color:var(--muted);font-size:10.5px;transition:border-color .2s,background .2s;font-family:inherit;padding:0}
+.ai-thumb-add:hover{border-color:var(--purple);background:var(--purple-bg);color:var(--purple)}
+.ai-thumb-add .plus{font-size:19px;line-height:1;font-weight:300}
+.ai-drop .counter{font-size:10.5px;color:var(--muted)}
+.ai-drop.has-imgs{padding:11px;gap:9px}
+.ai-drop.has-imgs .t2{padding:0 2px}
 /* 进度 / 状态 */
 .ai-status{display:none;align-items:center;gap:11px;margin-top:14px;padding:11px 14px;border-radius:var(--r,12px);
   background:var(--purple-bg);color:#5b3fb8;font-size:13px}
@@ -835,9 +855,9 @@ mark.hl{background:rgba(224,168,0,.28);color:inherit;border-radius:3px;padding:0
         <div class="ai-drop" id="aiDrop">
           <span class="ic">📷</span>
           <span class="t1">点击上传，或 Ctrl+V 粘贴截图</span>
-          <span class="t2">也支持把图片拖拽到这里<br>支持 PNG / JPG / WEBP，单张</span>
+          <span class="t2">也支持把图片拖拽到这里<br>支持 PNG / JPG / WEBP，<b>最多 3 张</b></span>
         </div>
-        <input type="file" id="aiFile" accept="image/*" style="display:none">
+        <input type="file" id="aiFile" accept="image/*" multiple style="display:none">
       </div>
     </div>
     <div class="ai-status" id="aiStatus"><div class="ai-spin"></div><div><div id="aiStage">正在识别地点…</div><div class="sub" id="aiStageSub"></div></div></div>
@@ -1395,21 +1415,55 @@ function assignTiers(city){
       const f=window.COORD_FIX[p.id];
       if(f && typeof f[0]==="number" && typeof f[1]==="number"){ p.x=f[0]; p.y=f[1]; p.realCoord=true; }
     });
-    /* 高德 POI 真实住宿替换（data-hotels.js 快照 · 名称/地址/坐标/评分真实） */
+    /* 高德 POI 真实住宿替换（data-hotels.js 快照 · 名称/地址/坐标/评分/星级真实） */
     if(window.CITY_HOTELS && window.CITY_HOTELS[key] && window.CITY_HOTELS[key].length>=8){
       const hs=window.CITY_HOTELS[key].slice(0,20);
-      /* 分型基准价（对齐五档区间：青旅≤150 / 民宿 150–300 / 经济型 300–600 / 舒适型 600–1500 / 高档>1500） */
+      /* ---------------- v14.0：档次判定改为「星级优先」 ----------------
+         旧实现纯靠名称字符串猜（名字里有「青」就当青旅、评分≥4.7 就当 800），
+         会把「青旅风格精品酒店」压到 ¥100、把评分高的民宿抬到 ¥800 —— 误差很大。
+         新实现用高德 typecode 权威判定的 star/kind 分档，仅在两者都缺失时才回退到名称关键词。
+         基准价对齐五档区间：青旅≤150 / 民宿 150–300 / 经济型 300–600 / 舒适型 600–1500 / 高档>1500 */
       const baseOf=h=>{
+        /* ① 有明确星级 → 按星级取档中值（高德权威数据，最可信） */
+        if(h.star===5 || h.star===6) return 1200;    /* 五星及以上：高档 ¥1500± */
+        if(h.star===4)               return 750;     /* 四星：舒适型 ¥600–1500 */
+        if(h.star===3)               return 420;     /* 三星：经济偏上 ¥300–600 */
+        if(h.star===2)               return 260;
+        /* ② 无星级 → 按高德判定的酒店形态取基准 */
+        switch(h.kind){
+          case "hostel":        return 90;           /* 青年旅舍：床位 ¥50–150 */
+          case "guesthouse":    return 180;          /* 旅馆招待所 ¥80–250 */
+          case "economy-chain": return 280;          /* 经济型连锁（汉庭/如家档）¥200–400 */
+          case "apartment":     return 320;          /* 公寓式 */
+          default: break;
+        }
+        /* ③ 以上都没有（少量）→ 才回退到名称关键词，且仅作粗判 */
         const s=(h.n||"")+(h.t||"");
-        if(/青|招待所/.test(s)) return 100;                       /* 青旅床位 ¥50–150 */
-        if(/民宿|客栈|公寓/.test(h.n||"")) return 260;             /* 民宿 ¥150–300 */
-        if((+h.r||0)>=4.7) return 800;                            /* 舒适型 ¥600–1500 */
-        return 420;                                               /* 经济型 ¥300–600 */
+        if(/青旅|青年旅舍|招待所/.test(s)) return 90;
+        if(/民宿|客栈|公寓/.test(h.n||"")) return 260;
+        return 380;                                  /* 普通宾馆酒店（无星级）中值 */
+      };
+      /* 档内按评分微调：同档里评分高的取偏上值，评分低的取偏下值（±15%）
+         —— 让「都是四星但口碑差距大」的两家酒店在预算上能区分开 */
+      const rateAdj=h=>{
+        const r=parseFloat(h.r);
+        if(!isFinite(r) || r<=0) return 1;
+        return 1 + Math.max(-0.15, Math.min(0.15, (r-4.3)/4.7*0.3));
+      };
+      const tnameOf=h=>{
+        if(h.star) return h.star+"星级宾馆";
+        const m={hostel:"青年旅舍",guesthouse:"旅馆招待所","economy-chain":"经济型连锁酒店",
+                 apartment:"公寓式酒店",hotel:"宾馆酒店"};
+        return m[h.kind] || (h.t||"").split(";").slice(1).join("/") || "住宿";
       };
       const others=pois.filter(p=>p.cat!=="hotel");
       const hpois=hs.map((h,i)=>{
-        const hasPrice=!!(h.price && +h.price>0), v=baseOf(h);
-        const tname=(h.t||"").split(";").slice(1).join("/")||"住宿";
+        const hasPrice=!!(h.price && +h.price>0);
+        const base=baseOf(h), v=Math.round(base*rateAdj(h));
+        const tname=tnameOf(h);
+        const priceNote=hasPrice
+          ? " · 参考价 ¥"+h.price+"（高德最低价 · 以预订平台为准）"
+          : " · 参考价 ¥"+v+"（按"+(h.star?(h.star+"星级"):"同型")+"基准估算）";
         return {
           id:"c-"+key+"-hotel"+i, name:h.n, cat:"hotel",
           x:h.x, y:h.y, city:src.name,
@@ -1417,11 +1471,14 @@ function assignTiers(city){
           stay:"一晚",
           econ:hasPrice?Math.round(+h.price):v,
           comfort:hasPrice?Math.round(+h.price*1.3):Math.round(v*1.3),
-          pn:(h.addr||"")+(h.r?(" · 评分 "+h.r):"")+(hasPrice?(" · 参考价 ¥"+h.price+"（价格以预订平台为准）"):" · 暂无参考价（预算按同型基准估算）"),
-          desc:"地址："+(h.addr||"暂无")+(h.r?(" · 评分 "+h.r):"")+" · 类型："+tname+" · 数据源：高德地图 POI",
-          reason:"高德地图真实住宿 · 真实坐标落点",
+          pn:(h.addr||"")+(h.r?(" · 评分 "+h.r):"")+priceNote,
+          desc:"地址："+(h.addr||"暂无")+(h.r?(" · 评分 "+h.r):"")
+            +" · 类型："+tname+" · 数据源：高德地图 POI"+(hasPrice?"（含最低价）":"（价格按星级基准）"),
+          reason:"高德地图真实住宿 · 真实坐标落点"+(h.star?(" · "+h.star+"星级"):""),
           src:"🏨 高德地图 POI 真实数据 · 价格以预订平台为准",
-          amapHotel:true, priceMissing:!hasPrice, amapId:(h.id||"")   /* 高德 POI ID · v9 搜索管线本地精确匹配 */
+          amapHotel:true, priceMissing:!hasPrice, amapId:(h.id||""),
+          /* v14.0 新增：供筛选/排序与「按档次替换」逻辑使用 */
+          star:h.star||null, hotelKind:h.kind||"hotel", realPrice:hasPrice?Math.round(+h.price):null
         };
       });
       pois.length=0; pois.push(...others,...hpois);
@@ -5205,7 +5262,12 @@ function catToPoi(textCat){
    ④ 主流程：文本/图片独立识别 → 合并 → 高德定位 → 上图 → 聚类连线
 ------------------------------------------------------------------ */
 let LAST=null;                 /* 最近一次导入结果 {items:[{p,tok,cat,far,score}], days:[[id…]]} */
-let lastClipImg=null;          /* 剪贴板图片 {base64,mime} */
+/* v14.0：截图改为多图（上限 MAX_IMGS 张）。内部统一用数组；
+   clipImg 仍保留「单图」读写口径以向后兼容既有测试与调用方：
+   · get clipImg → 返回首图（无图时 null）
+   · set clipImg → 单图赋值（null 表示清空全部） */
+const MAX_IMGS=3;              /* 截图上传上限（与 UI 文案保持一致） */
+let lastClipImgs=[];           /* 已就绪截图数组 [{base64,mime,w,h,scene,size}] */
 let busy=false;
 
 /* 读取当前作用域城市名（用于「非本地」判定：依赖文本/图片中出现的城市名 + 高德返回的行政区）
@@ -5237,13 +5299,26 @@ function run(opt, hooks){
   const h=hooks||{};
   const text=(opt&&opt.text||"").trim();
   const img=opt&&opt.image||null;
-  if(!text && !img) return Promise.reject(new Error("请提供文本或截图"));
+  /* v14.0：image 可为单对象 {base64,mime} 或数组（多图，最多 MAX_IMGS 张）。
+     向后兼容单对象写法，内部统一成数组处理。 */
+  const imgs=Array.isArray(img) ? img.filter(Boolean) : (img?[img]:[]);
+  if(!text && !imgs.length) return Promise.reject(new Error("请提供文本或截图"));
   state.__aiLastText=text;
   const jobs=[];
   if(text) jobs.push({src:"文本", p:qwenTextExtract(text)});
-  if(img)  jobs.push({src:"截图", p:qwenVisionExtract(img.base64, img.mime)});
-  if(h.onStage) h.onStage("识别中", jobs.length>1?"文本 + 截图":"（"+(text?"文本":"截图")+"）");
-  /* 各自独立识别（不叠加）：分别调千问，最后按类别合并去重 */
+  /* 每张截图各走一次独立识别 —— 不拼成一次多图请求，原因是：
+     ① 单图 prompt 更聚焦，抽取质量更稳；
+     ② 某一张失败不影响其余，容错更好。合并去重统一在下面做。 */
+  imgs.forEach((im,i)=>{
+    jobs.push({src:imgs.length>1?("截图"+(i+1)):"截图", p:qwenVisionExtract(im.base64, im.mime)});
+  });
+  if(h.onStage){
+    const parts=[];
+    if(text) parts.push("文本");
+    if(imgs.length) parts.push(imgs.length>1?("截图 ×"+imgs.length):"截图");
+    h.onStage("识别中", parts.join(" + "));
+  }
+  /* 各自独立识别（不叠加）：分别调模型，最后按类别合并去重 */
   return Promise.all(jobs.map(j=>j.p.catch(e=>({__err:e.message||String(e)}))))
     .then(results=>{
       const errs=[], merged={spots:[],hotels:[],foods:[]};
@@ -5256,6 +5331,8 @@ function run(opt, hooks){
         throw new Error("识别失败："+errs.join("；"));
       if(!merged.spots.length && !merged.hotels.length && !merged.foods.length)
         throw new Error("EMPTY");
+      /* 部分失败：不阻断，但要留痕（供上层提示） */
+      if(errs.length) merged.__partialErrs=errs;
       /* 分类内去重（同名只留一个） */
       ["spots","hotels","foods"].forEach(k=>{
         const seen=new Set();
@@ -5316,7 +5393,10 @@ function run(opt, hooks){
   amapFindOne:amapFindOne, amapFindAll:amapFindAll, nameScore:nameScore,
   catToPoi:catToPoi, scanCityNames:scanCityNames, isFarRec:isFarRec,
   hasKey:hasKey, readKey:readKey, writeKey:writeKey, curKey:curKey,  get LAST(){ return LAST; }, set LAST(v){ LAST=v; },
-  get clipImg(){ return lastClipImg; }, set clipImg(v){ lastClipImg=v; },
+  /* clipImg：单图兼容口径（返回首图）；clipImgs：多图数组口径（v14.0 新增） */
+  get clipImg(){ return lastClipImgs[0] || null; }, set clipImg(v){ lastClipImgs = v ? [v] : []; },
+  get clipImgs(){ return lastClipImgs; }, set clipImgs(v){ lastClipImgs = Array.isArray(v) ? v : (v?[v]:[]); },
+  MAX_IMGS:MAX_IMGS,
   get busy(){ return busy; }, set busy(v){ busy=v; }
 };
 })();
@@ -5465,55 +5545,126 @@ function readImage(f){
     fr.readAsDataURL(f);
   });
 }
-function showImage(info){
-  drop.innerHTML='<button class="rm" id="aiRm" title="移除图片">✕</button>'
-    +'<img src="data:'+info.mime+';base64,'+info.base64+'" alt="待识别截图">'
-    +'<span class="t2">已就绪 · '+info.scene+' · '+info.size+'</span>';
-  const rm=$("aiRm");
-  if(rm) rm.onclick=e=>{ e.stopPropagation(); clearImage(); };
-}
+/* ---------- v14.0：多图预览渲染（上限 MAX_IMGS 张） ---------- */
+const MAX_IMGS=AI_IMPORT.MAX_IMGS||3;
 /* 上传区回落到初始提示（Tab 切换/重置共用；文案与 DOM 初值保持一致） */
 const DROP_IDLE='<span class="ic">📷</span><span class="t1">点击上传，或 Ctrl+V 粘贴截图</span>'
-  +'<span class="t2">也支持把图片拖拽到这里<br>支持 PNG / JPG / WEBP，单张</span>';
+  +'<span class="t2">也支持把图片拖拽到这里<br>支持 PNG / JPG / WEBP，<b>最多 '+MAX_IMGS+' 张</b></span>';
+/* 渲染缩略图网格；每张带序号角标 + 删除按钮，末尾附「继续添加」格子（未达上限时） */
+function renderImgs(){
+  const imgs=AI_IMPORT.clipImgs;
+  if(!imgs.length){ drop.classList.remove("has-imgs"); drop.innerHTML=DROP_IDLE; return; }
+  drop.classList.add("has-imgs");
+  let html='<div class="ai-thumbs">';
+  imgs.forEach((im,i)=>{
+    html+='<div class="ai-thumb">'
+      +'<span class="idx">'+(i+1)+'</span>'
+      +'<button class="rm" data-i="'+i+'" title="移除这一张">✕</button>'
+      +'<img src="data:'+im.mime+';base64,'+im.base64+'" alt="待识别截图 '+(i+1)+'">'
+      +'<span class="meta">'+esc(im.scene)+' · '+esc(im.size)+'</span>'
+      +'</div>';
+  });
+  if(imgs.length<MAX_IMGS){
+    html+='<button class="ai-thumb-add" id="aiAddMore" title="继续添加截图">'
+      +'<span class="plus">+</span><span>继续添加</span></button>';
+  }
+  html+='</div>';
+  html+='<span class="t2">已就绪 '+imgs.length+'/'+MAX_IMGS+' 张 · 识别时分别读取后合并去重</span>';
+  drop.innerHTML=html;
+  /* 逐张删除（事件委托，避免重复绑定） */
+  drop.querySelectorAll(".ai-thumb .rm").forEach(btn=>{
+    btn.onclick=e=>{ e.stopPropagation(); removeImg(+btn.getAttribute("data-i")); };
+  });
+  const more=$("aiAddMore");
+  if(more) more.onclick=e=>{ e.stopPropagation(); file.click(); };
+}
+/* 删除指定序号的图；其余顺延（保持数组紧凑） */
+function removeImg(i){
+  const imgs=AI_IMPORT.clipImgs.slice();
+  if(i<0 || i>=imgs.length) return;
+  imgs.splice(i,1);
+  AI_IMPORT.clipImgs=imgs;
+  renderImgs();
+  try{ syncGo(); syncTabDots(); }catch(e){}
+}
 function clearImage(){
-  AI_IMPORT.clipImg=null;
+  AI_IMPORT.clipImgs=[];
+  drop.classList.remove("has-imgs");
   drop.innerHTML=DROP_IDLE;
   bindDrop();
   try{ syncGo(); syncTabDots(); }catch(e){}   /* resetAi() 早于 syncGo 定义时静默跳过 */
 }
+/* 追加一张图（多张时按顺序累加；超出上限给出提示，不静默丢弃） */
 function takeFile(f){
-  readImage(f).then(info=>{ AI_IMPORT.clipImg=info; showImage(info); setRes(""); syncGo(); syncTabDots(); })
-    .catch(err=>setRes('<div class="ai-note bad">⚠️ '+esc(err.message)+'</div>'));
+  const cur=AI_IMPORT.clipImgs.slice();
+  if(cur.length>=MAX_IMGS){
+    setRes('<div class="ai-note bad">⚠️ 最多上传 '+MAX_IMGS+' 张截图</div>'
+      +'<div class="ai-note" style="margin-top:8px">如需替换，请先点缩略图右上角的 ✕ 移除其中一张。</div>');
+    return;
+  }
+  readImage(f).then(info=>{
+    const now=AI_IMPORT.clipImgs.slice();
+    if(now.length>=MAX_IMGS){ return; }        /* 读取期间已被别的操作填满 → 放弃 */
+    now.push(info);
+    AI_IMPORT.clipImgs=now;
+    renderImgs(); setRes(""); syncGo(); syncTabDots();
+    if(now.length===MAX_IMGS) toast("已满 "+MAX_IMGS+" 张 · 点击「确认上传」开始识别");
+  }).catch(err=>setRes('<div class="ai-note bad">⚠️ '+esc(err.message)+'</div>'));
+}
+/* 批量追加（拖拽多文件 / 选择多文件共用）：只取还装得下的前 N 张，并提示被忽略的数量 */
+function takeFiles(list){
+  const files=[].slice.call(list||[]).filter(f=>f && /^image\//.test(f.type||""));
+  if(!files.length) return;
+  const room=MAX_IMGS - AI_IMPORT.clipImgs.length;
+  if(room<=0){
+    setRes('<div class="ai-note bad">⚠️ 最多上传 '+MAX_IMGS+' 张截图</div>'
+      +'<div class="ai-note" style="margin-top:8px">如需替换，请先点缩略图右上角的 ✕ 移除其中一张。</div>');
+    return;
+  }
+  const use=files.slice(0,room), skipped=files.length-use.length;
+  if(skipped>0){
+    setRes('<div class="ai-note">ℹ️ 本次仅添加前 '+use.length+' 张（上限 '+MAX_IMGS+' 张），'
+      +'其余 '+skipped+' 张未添加。</div>');
+  }
+  use.forEach(f=>takeFile(f));
 }
 function bindDrop(){
   drop.onclick=()=>file.click();
   drop.addEventListener("dragover",e=>{ e.preventDefault(); drop.classList.add("over"); });
   drop.addEventListener("dragleave",()=>drop.classList.remove("over"));
   drop.addEventListener("drop",e=>{ e.preventDefault(); drop.classList.remove("over");
-    const f=e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]; if(f) takeFile(f); });
+    const fs=e.dataTransfer && e.dataTransfer.files;
+    if(fs && fs.length) takeFiles(fs); });
 }
 bindDrop();
-file.addEventListener("change",()=>{ const f=file.files&&file.files[0]; if(f) takeFile(f); file.value=""; });
+/* 支持一次选多张（input 已加 multiple） */
+file.addEventListener("change",()=>{
+  const fs=file.files;
+  if(fs && fs.length) takeFiles(fs);
+  file.value="";
+});
 
 /* Ctrl+V 粘贴剪贴板图片
-   · 仅在面板打开 **且当前处于「上传截图」Tab** 时接管（避免影响页面其他粘贴行为）
+   · 仅在面板打开时接管（避免影响页面其他粘贴行为）
    · 在文本 Tab 按 Ctrl+V → 自动切到截图 Tab 并完成粘贴，符合直觉
+   · 剪贴板可能有多个 image/* item（截图工具连拍/多选复制）→ 全部收集后批量追加
    · 粘贴成功后图片立即出现在预览区，并把主按钮切到可点状态 */
 document.addEventListener("paste",e=>{
   if(!sheet.classList.contains("show")) return;
   const items=(e.clipboardData && e.clipboardData.items)||[];
+  const picked=[];
   for(let i=0;i<items.length;i++){
     if(items[i].type && items[i].type.indexOf("image/")===0){
       const f=items[i].getAsFile();
-      if(f){
-        e.preventDefault();
-        switchTab("shot");                                   /* 有图 → 自动跳到截图 Tab */
-        takeFile(f);
-        toast("已粘贴截图 · 点击「生成规划」开始识别");
-      }
-      return;
+      if(f) picked.push(f);
     }
   }
+  if(!picked.length) return;
+  e.preventDefault();
+  switchTab("shot");                                   /* 有图 → 自动跳到截图 Tab */
+  takeFiles(picked);
+  const room=MAX_IMGS - AI_IMPORT.clipImgs.length;
+  toast(room>0 ? "已粘贴截图 · 点击「确认上传」开始识别" : "已粘贴截图 · 已达 "+MAX_IMGS+" 张上限");
 });
 
 /* ---------- 状态 / 结果区 ---------- */
@@ -5534,9 +5685,9 @@ const AI_CN={sight:"风景",hotel:"住宿",food:"美食"};
 /* ---------- 生成规划主流程 ---------- */
 function generate(){
   const text=($("aiText").value||"").trim();
-  const img=AI_IMPORT.clipImg;
-  /* 两种输入都能触发：只文本 / 只图片 / 两者都有（合并识别，由 AI_IMPORT.run 负责） */
-  if(!text && !img){ setRes('<div class="ai-note bad">请先粘贴文本，或上传 / Ctrl+V 粘贴一张截图</div>'); syncGo(); return; }
+  const imgs=AI_IMPORT.clipImgs;
+  /* 两种输入都能触发：只文本 / 只图片（可多张）/ 两者都有（合并识别，由 AI_IMPORT.run 负责） */
+  if(!text && !imgs.length){ setRes('<div class="ai-note bad">请先粘贴文本，或上传 / Ctrl+V 粘贴截图</div>'); syncGo(); return; }
   if(AI_IMPORT.busy) return;                 /* 防重复点击 */
   /* v13.0：Key 已在服务端，前端只校验代理地址是否就位 */
   if(!AI_IMPORT.CFG.proxy){
@@ -5548,8 +5699,10 @@ function generate(){
   AI_IMPORT.busy=true;
   syncGo();                                  /* → 加载态：按钮禁用 + 文案「正在识别地点…」 */
   setRes("");
-  stage("正在识别地点…", (text&&img)?"文本 + 截图 分别识别":(text?"文本识别":"截图识别"));
-  AI_IMPORT.run({text:text, image:img}, {
+  stage("正在识别地点…",
+    (text&&imgs.length) ? ("文本 + 截图"+(imgs.length>1?(" ×"+imgs.length):"")+" 分别识别")
+    : (imgs.length ? ("截图识别"+(imgs.length>1?("（"+imgs.length+" 张）"):"")) : "文本识别"));
+  AI_IMPORT.run({text:text, image:imgs}, {
     onStage:(m,sub)=>{ stage(m,sub); }
   }).then(items=>{
     AI_IMPORT.busy=false;
