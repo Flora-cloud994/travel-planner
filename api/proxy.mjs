@@ -4,13 +4,18 @@
    作用：把 API Key 全部收敛到服务端环境变量，前端不再持有任何 Key。
 
    环境变量（在 Vercel 项目 Settings → Environment Variables 配置）：
-     · DASHSCOPE_KEY —— 阿里云百炼（DashScope）API Key
+     · DEEPSEEK_KEY  —— DeepSeek 开放平台 API Key（文本识别，主用）
+     · DASHSCOPE_KEY —— 阿里云百炼（DashScope）API Key（可选：仅用于截图识别）
+                        若配置了，截图走千问视觉模型；未配置则截图功能自动禁用，
+                        文本识别不受影响。
      · AMAP_KEY      —— 高德开放平台「Web 服务」类型 Key
-     · TMAP_KEY      —— 腾讯位置服务 Key（用于到达点搜索）
+     · TMAP_KEY      —— 腾讯位置服务 Key（可选，用于到达点搜索）
 
    前端调用方式（一律 POST /api/proxy，靠 type 字段区分目标）：
-     { "type": "qwen-text",   "body": { model, messages, ... } }   → 千问文本模型
-     { "type": "qwen-image",  "body": { model, messages, ... } }   → 千问视觉模型
+     { "type": "qwen-text",   "body": { model, messages, ... } }   → 文本模型
+        （服务端会强制把 model 重写为 DEEPSEEK_MODEL，前端传的 model 不生效）
+     { "type": "qwen-image",  "body": { model, messages, ... } }   → 视觉模型
+        （走 DASHSCOPE_KEY + 千问视觉模型；未配 DASHSCOPE_KEY 时返回明确错误）
      { "type": "amap-search", "path": "place/text", "params": {…} } → 高德 POI 搜索
         （amap 通道向后兼容 "endpoint" 字段，等价于 "path"）
      { "type": "tmap-search", "params": "keyword=…&boundary=…" }   → 腾讯地图 POI 搜索
@@ -20,7 +25,13 @@
    请求体时，默认按 qwen-text 处理；带 type 时以 type 为准。
    ============================================================================ */
 
+/* DeepSeek：文本识别（OpenAI 兼容端点） */
+const DEEPSEEK_BASE = "https://api.deepseek.com";
+const DEEPSEEK_MODEL = "deepseek-chat";
+
+/* 阿里云百炼：仅用于视觉（截图）识别 */
 const DASHSCOPE_BASE = "https://dashscope.aliyuncs.com/compatible-mode/v1";
+
 const AMAP_BASE = "https://restapi.amap.com/v3";
 const TMAP_BASE = "https://apis.map.qq.com/ws/place/v1/search";
 
@@ -56,9 +67,21 @@ function json(res, status, obj) {
 
 /* 前置校验：type 是否合法、Key 是否已配置 */
 function validate(type) {
-  if (type === "qwen-text" || type === "qwen-image") {
+  if (type === "qwen-text") {
+    if (!process.env.DEEPSEEK_KEY) {
+      return { ok: false, status: 500, obj: { error: { message: "服务端未配置 DEEPSEEK_KEY" } } };
+    }
+    return { ok: true };
+  }
+  if (type === "qwen-image") {
+    /* 视觉识别走千问；未配 DASHSCOPE_KEY 时明确告知「截图功能不可用」，
+       而不是笼统报错 —— 文本识别不依赖它。 */
     if (!process.env.DASHSCOPE_KEY) {
-      return { ok: false, status: 500, obj: { error: { message: "服务端未配置 DASHSCOPE_KEY" } } };
+      return {
+        ok: false,
+        status: 503,
+        obj: { error: { message: "服务端未配置 DASHSCOPE_KEY，截图识别功能不可用（文本识别不受影响）", code: "vision_unavailable" } }
+      };
     }
     return { ok: true };
   }
@@ -84,8 +107,28 @@ function typeOf(payload) {
   return "";
 }
 
-/* ---------------- 千问转发（文本 / 视觉共用同一兼容端点） ---------------- */
-async function forwardQwen(payload, res) {
+/* ---------------- 文本转发（DeepSeek，OpenAI 兼容端点） ----------------
+   前端传的 body 是标准 OpenAI 兼容请求体。为保证「换模型只改服务端」，
+   这里强制把 model 重写为 DEEPSEEK_MODEL，前端传的 model 一律忽略。 */
+async function forwardDeepSeek(payload, res) {
+  const raw = payload.body && typeof payload.body === "object" ? payload.body : payload;
+  const body = Object.assign({}, raw, { model: DEEPSEEK_MODEL });
+  const upstream = await fetch(DEEPSEEK_BASE + "/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: "Bearer " + process.env.DEEPSEEK_KEY
+    },
+    body: JSON.stringify(body)
+  });
+  const text = await upstream.text();
+  res.statusCode = upstream.status;
+  res.setHeader("Content-Type", "application/json; charset=utf-8");
+  res.end(text);
+}
+
+/* ---------------- 视觉转发（阿里云百炼，仅截图识别用） ---------------- */
+async function forwardQwenVision(payload, res) {
   const body = payload.body && typeof payload.body === "object" ? payload.body : payload;
   const upstream = await fetch(DASHSCOPE_BASE + "/chat/completions", {
     method: "POST",
@@ -178,8 +221,11 @@ export default async function handler(req, res) {
   if (!gate.ok) return json(res, gate.status, gate.obj);
 
   try {
-    if (type === "qwen-text" || type === "qwen-image") {
-      return await forwardQwen(payload, res);
+    if (type === "qwen-text") {
+      return await forwardDeepSeek(payload, res);
+    }
+    if (type === "qwen-image") {
+      return await forwardQwenVision(payload, res);
     }
     if (type === "tmap-search") {
       return await forwardTmap(payload, res);

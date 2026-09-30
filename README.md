@@ -56,11 +56,15 @@ Vercel Serverless（api/proxy.mjs，持有 Key）
 
 | 环境变量 | 用途 | 是否必填 | 申请地址 |
 | --- | --- | --- | --- |
-| `DASHSCOPE_KEY` | 千问识别（文本 + 视觉） | **必填** | 阿里云百炼控制台 → **API-KEY 管理** |
+| `DEEPSEEK_KEY` | **文本识别**（粘贴攻略文案 → 抽取地点） | **必填** | https://platform.deepseek.com/api_keys |
 | `AMAP_KEY` | 高德地点搜索 / 路线规划 | **必填** | 高德开放平台 → 应用管理 → 添加 Key，**服务平台必须选「Web服务」** |
+| `DASHSCOPE_KEY` | **截图识别**（图片 → 抽取地点） | 可选 | 阿里云百炼控制台 → **API-KEY 管理**（格式：`sk-` + 32 位十六进制） |
 | `TMAP_KEY` | 腾讯地图「到达点搜索」 | 可选 | 腾讯位置服务 → 应用管理 → 添加 Key，勾选 **WebService API** |
 
 > 高德 Key 若选成「Web端(JS API)」，服务端调用会报 `USERKEY_PLAT_NOMATCH`。
+>
+> **`DASHSCOPE_KEY` 可以不填**（v13.4 起）：因为 DeepSeek 没有视觉模型，截图识别仍走千问。
+> 不填时「🖼 上传截图」功能会自动禁用并在页面上明确提示，**「📝 攻略文本」识别完全不受影响**，其余功能全部正常。
 >
 > **`TMAP_KEY` 可以不填**：不填时「到达点搜索」搜不到结果，接驳方案退化为按坐标距离估算（费用与时间仍正常显示），其余功能不受影响。
 
@@ -82,8 +86,9 @@ git push -u origin main
 1. 登录 [vercel.com](https://vercel.com) → **Add New… → Project** → 选择上面的仓库；
 2. **Framework Preset** 选 `Other`（本项目的根目录 `travel-planner.html` 会作为静态页面自动部署，`api/proxy.mjs` 自动识别为 Serverless 函数）；
 3. 展开 **Environment Variables**，添加：
-   - `DASHSCOPE_KEY` = 你的千问 Key（必填）
-   - `AMAP_KEY` = 你的高德 Web 服务 Key（必填）
+   - `DEEPSEEK_KEY` = 你的 DeepSeek Key（**必填**，用于文本识别）
+   - `AMAP_KEY` = 你的高德 Web 服务 Key（**必填**）
+   - `DASHSCOPE_KEY` = 你的阿里云百炼 Key（可选，仅截图识别用）
    - `TMAP_KEY` = 你的腾讯位置服务 Key（**可选**，不填则「到达点搜索」不可用）
 4. 点 **Deploy**，等待完成。
 
@@ -144,10 +149,24 @@ npm run dev          # 启动 vercel dev，默认 http://localhost:3000
 ## 七、常见问题
 
 **Q：页面打开但识别一直失败？**
-先确认环境变量已配置且**重新部署**（Vercel 修改环境变量后需 Redeploy 才生效）。
+按顺序排查（页面上的报错提示已能区分多数情况）：
+1. 确认环境变量已配置，且改完**重新部署**（Vercel 修改环境变量后需 Redeploy 才生效）；
+2. 若报错含 `Protected deployment` / `vercel_auth` → 是 **Vercel 部署保护**拦的，
+   去 **Settings → Deployment Protection** 把范围从 `All Deployments` 改为
+   `Standard Protection` 或 `Disabled`。注意：**改这个不需要重新部署**，
+   但在自己浏览器里看不出来（你有登录 cookie），请用**无痕窗口**验证。
 
-**Q：提示「服务端未配置 DASHSCOPE_KEY」？**
-对应环境变量缺失或拼写错误，注意是 `DASHSCOPE_KEY`（不是 `DASHSCOPE_API_KEY`）。
+**Q：提示「服务端未配置 DEEPSEEK_KEY」？**
+对应环境变量缺失或拼写错误。用于文本识别，必填。
+
+**Q：截图识别提示「未启用」？**
+截图走阿里云百炼视觉模型（DeepSeek 无视觉能力）。需配置 `DASHSCOPE_KEY`，
+格式为 `sk-` + 32 位十六进制。**不配不影响文本识别。**
+
+**Q：提示「上游 API Key 无效（HTTP 401）」？**
+Key 填错了。常见错误：把 RAM 的 AccessKey（`LTAI...`）、密钥对或其它凭证
+当成了 API Key。DeepSeek 的 Key 去 https://platform.deepseek.com/api_keys 拿；
+百炼的 Key 去百炼控制台 → API-KEY 拿。
 
 **Q：高德报 `USERKEY_PLAT_NOMATCH`？**
 Key 的服务平台类型不对，需重新申请「Web服务」类型的 Key。
