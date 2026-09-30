@@ -2,6 +2,9 @@
 node_modules/
 .vercel/
 
+# 构建产物（由 node sync-index.cjs 在构建期生成，不提交）
+public/
+
 # 环境变量（含真实 Key，绝不提交）
 .env
 .env.local
