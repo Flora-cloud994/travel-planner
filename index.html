@@ -383,8 +383,16 @@ mark.hl{background:rgba(224,168,0,.28);color:inherit;border-radius:3px;padding:0
 .tier-tag{display:inline-block;font-size:10px;padding:0 6px;border-radius:5px;margin-left:6px;vertical-align:1px;border:1px solid transparent}
 .tier-tag.t-econ{background:var(--green-bg);color:var(--green)}
 .tier-tag.t-youth{background:#eef2fb;color:#4a6bb5}
+.tier-tag.t-bnb{background:#f3ecfb;color:#7048b6}
 .tier-tag.t-comfort{background:var(--yellow-bg);color:#8a6d1a}
 .tier-tag.t-premium{background:var(--blue-bg);color:var(--blue)}
+/* v15.0 住宿卡片「类型标签」：与类目标签并列显示五档归属 */
+.hotel-class-tag{display:inline-block;font-size:11px;padding:1px 8px;border-radius:6px;margin-left:6px;vertical-align:1px;font-weight:600}
+.hotel-class-tag.t-youth{background:#eef2fb;color:#4a6bb5}
+.hotel-class-tag.t-bnb{background:#f3ecfb;color:#7048b6}
+.hotel-class-tag.t-econ{background:var(--green-bg);color:var(--green)}
+.hotel-class-tag.t-comfort{background:var(--yellow-bg);color:#8a6d1a}
+.hotel-class-tag.t-premium{background:var(--blue-bg);color:var(--blue)}
 .book-link{color:#1a73c7;text-decoration:none;border-bottom:1px dashed #1a73c7;font-weight:600}
 .book-link:hover{color:#0d5cad;border-bottom-style:solid}
 
@@ -692,10 +700,10 @@ mark.hl{background:rgba(224,168,0,.28);color:inherit;border-radius:3px;padding:0
       <div class="budget-live" id="budgetLive"><span id="budgetLiveText">总预算 <b>¥5,000</b> · 档位</span> <b id="budgetBand2">适中</b><span> · 超出部分优先降级餐饮，景点尽量保留</span></div>
       <div class="budget-row room-row">
         <div class="budget-val" id="roomVal">¥800</div>
-        <input type="range" id="roomSlider" min="100" max="5000" step="50" value="800">
+        <input type="range" id="roomSlider" min="60" max="5000" step="10" value="800">
         <div class="budget-band band-mid" id="roomBand">舒适型</div>
       </div>
-      <div class="budget-scale"><span>¥100 起（低于 ¥100 的住宿不显示）</span><span>高档 ¥5,000</span></div>
+      <div class="budget-scale"><span>¥60 起（低于 ¥60 的住宿不显示）</span><span>高档 ¥5,000</span></div>
       <div class="budget-live"><span>每晚房费上限 <b id="roomLiveVal">¥800</b> · 住宿档位</span> <b id="roomBand2">舒适型</b><span> · 青旅/民宿/经济型/舒适型/高档 · 仅约束住宿，不影响景点与餐饮</span></div>
       <div class="budget-warn" id="budgetWarn"></div>
     </div>
@@ -738,11 +746,12 @@ mark.hl{background:rgba(224,168,0,.28);color:inherit;border-radius:3px;padding:0
               <button class="close" id="infoClose">✕</button>
               <h3 id="icName"></h3>
               <span class="cat-tag" id="icTag"></span>
+              <span class="hotel-class-tag" id="icHotelClass" style="display:none"></span>
               <div class="over-budget-note" id="icOver" style="display:none"></div>
               <p class="desc" id="icDesc"></p>
               <div class="kv"><b>推荐理由</b><span id="icReason"></span></div>
               <div class="kv"><b>建议停留</b><span id="icStay"></span></div>
-              <div class="kv" id="icRowHotel"><b>房价区间</b><span id="icHotel"></span></div>
+              <div class="kv" id="icRowHotel"><b>价格</b><span id="icHotel"></span></div>
               <div class="kv" id="icRowBook" style="display:none"><b>预订</b><span><a id="icBook" class="book-link" href="#" target="_blank" rel="noopener"></a></span></div>
               <div class="kv" id="icRowFood"><b>招牌菜</b><span id="icFood"></span></div>
               <div class="kv" id="icRowAdd" style="display:none"><b>操作</b><span><button id="icAddRoute" class="btn btn-green" style="padding:4px 12px;font-size:12.5px">＋ 加入路线</button></span></div>
@@ -1359,7 +1368,10 @@ const TIER_NAME = {0:"经济",1:"舒适",2:"高档"};
 const HTIER_KEYS = ["youth","bnb","econ","comfort","premium"];
 const HTIER_NAME = {0:"青旅",1:"民宿",2:"经济型",3:"舒适型",4:"高档"};
 const HTIER_ORDER = {youth:0, bnb:1, econ:2, comfort:3, premium:4};
-const roomBandOf = v => v<=150?["青旅","band-econ"]:v<=300?["民宿","band-econ"]:v<=600?["经济型","band-econ"]:v<=1500?["舒适型","band-mid"]:["高档","band-comf"];
+/* 房费预算 → 档位标签。阈值与 HCLASS 区间上界对齐：
+   青旅 ≤120 / 民宿 ≤500 / 经济型 ≤800 / 舒适型 ≤1500 / 高档 >1500
+   （v15.1：青旅上界由 150 下调至 120，与青旅参考区间 ¥60–120 一致）*/
+const roomBandOf = v => v<=120?["青旅","band-econ"]:v<=500?["民宿","band-econ"]:v<=800?["经济型","band-econ"]:v<=1500?["舒适型","band-mid"]:["高档","band-comf"];
 /* 按同城同类别「价格名次」分桶指派档位：
    景点/餐饮三等分（经济/舒适/高档），住宿五等分（青旅/民宿/经济型/舒适型/高档）
    保证每城每类每档都有可替换项（按名次切分，避免大量同价项把某一档挤空） */
@@ -1370,12 +1382,19 @@ function assignTiers(city){
     const sorted = arr.slice().sort((a,b)=>a.econ-b.econ || a.comfort-b.comfort || (a.id<b.id?-1:1));
     const n=sorted.length;
     if(cat==="hotel"){
-      const q=Math.max(2,Math.ceil(n/5));                  /* 每档至少 2 个可替换项 */
-      sorted.forEach((p,i)=>{ p.tier = i<q ? "youth" : i<2*q ? "bnb" : i<3*q ? "econ" : i<4*q ? "comfort" : "premium"; });
-      /* 兜底：若最后一档不足 2 项，从「舒适型」档最贵的项升档补足 */
-      while(sorted.filter(p=>p.tier==="premium").length<2){
-        const donor=[...sorted].reverse().find(p=>p.tier==="comfort");
-        if(!donor) break; donor.tier="premium";
+      /* v15.0：住宿档位不再按「价格名次五等分」，改为「按五档分类直接指派」。
+         原因：名次分桶会让分类与实际档位脱节 —— 例如某城青旅少、把一批舒适型
+         挤进 youth 档，标签写着「青旅」价格却是 ¥600。
+         现在 hotelClass（抓取/前端判定的五档）即 tier，分类与标签严格一致。 */
+      let mapped=0;
+      sorted.forEach(p=>{
+        if(p.hotelClass && HTIER_ORDER[p.hotelClass]!==undefined){ p.tier=p.hotelClass; mapped++; }
+      });
+      /* 兜底：极少数没有 hotelClass 的住宿（如非数据库来源）仍按价格名次分桶 */
+      if(mapped < n){
+        const rest=sorted.filter(p=>!(p.hotelClass && HTIER_ORDER[p.hotelClass]!==undefined));
+        const q=Math.max(1, Math.ceil(rest.length/5));
+        rest.forEach((p,i)=>{ p.tier = i<q ? "youth" : i<2*q ? "bnb" : i<3*q ? "econ" : i<4*q ? "comfort" : "premium"; });
       }
     } else {
       const cut1=Math.max(1,Math.floor(n/3)), cut2=Math.max(cut1+1,Math.floor(2*n/3));
@@ -1415,76 +1434,106 @@ function assignTiers(city){
       const f=window.COORD_FIX[p.id];
       if(f && typeof f[0]==="number" && typeof f[1]==="number"){ p.x=f[0]; p.y=f[1]; p.realCoord=true; }
     });
-    /* 高德 POI 真实住宿替换（data-hotels.js 快照 · 名称/地址/坐标/评分/星级真实） */
-    if(window.CITY_HOTELS && window.CITY_HOTELS[key] && window.CITY_HOTELS[key].length>=8){
-      const hs=window.CITY_HOTELS[key].slice(0,20);
-      /* ---------------- v14.0：档次判定改为「星级优先」 ----------------
-         旧实现纯靠名称字符串猜（名字里有「青」就当青旅、评分≥4.7 就当 800），
-         会把「青旅风格精品酒店」压到 ¥100、把评分高的民宿抬到 ¥800 —— 误差很大。
-         新实现用高德 typecode 权威判定的 star/kind 分档，仅在两者都缺失时才回退到名称关键词。
-         基准价对齐五档区间：青旅≤150 / 民宿 150–300 / 经济型 300–600 / 舒适型 600–1500 / 高档>1500 */
-      const baseOf=h=>{
-        /* ① 有明确星级 → 按星级取档中值（高德权威数据，最可信） */
-        if(h.star===5 || h.star===6) return 1200;    /* 五星及以上：高档 ¥1500± */
-        if(h.star===4)               return 750;     /* 四星：舒适型 ¥600–1500 */
-        if(h.star===3)               return 420;     /* 三星：经济偏上 ¥300–600 */
-        if(h.star===2)               return 260;
-        /* ② 无星级 → 按高德判定的酒店形态取基准 */
-        switch(h.kind){
-          case "hostel":        return 90;           /* 青年旅舍：床位 ¥50–150 */
-          case "guesthouse":    return 180;          /* 旅馆招待所 ¥80–250 */
-          case "economy-chain": return 280;          /* 经济型连锁（汉庭/如家档）¥200–400 */
-          case "apartment":     return 320;          /* 公寓式 */
-          default: break;
-        }
-        /* ③ 以上都没有（少量）→ 才回退到名称关键词，且仅作粗判 */
-        const s=(h.n||"")+(h.t||"");
-        if(/青旅|青年旅舍|招待所/.test(s)) return 90;
-        if(/民宿|客栈|公寓/.test(h.n||"")) return 260;
-        return 380;                                  /* 普通宾馆酒店（无星级）中值 */
-      };
-      /* 档内按评分微调：同档里评分高的取偏上值，评分低的取偏下值（±15%）
-         —— 让「都是四星但口碑差距大」的两家酒店在预算上能区分开 */
-      const rateAdj=h=>{
-        const r=parseFloat(h.r);
-        if(!isFinite(r) || r<=0) return 1;
-        return 1 + Math.max(-0.15, Math.min(0.15, (r-4.3)/4.7*0.3));
-      };
-      const tnameOf=h=>{
-        if(h.star) return h.star+"星级宾馆";
-        const m={hostel:"青年旅舍",guesthouse:"旅馆招待所","economy-chain":"经济型连锁酒店",
-                 apartment:"公寓式酒店",hotel:"宾馆酒店"};
-        return m[h.kind] || (h.t||"").split(";").slice(1).join("/") || "住宿";
-      };
-      const others=pois.filter(p=>p.cat!=="hotel");
-      const hpois=hs.map((h,i)=>{
-        const hasPrice=!!(h.price && +h.price>0);
-        const base=baseOf(h), v=Math.round(base*rateAdj(h));
-        const tname=tnameOf(h);
-        const priceNote=hasPrice
-          ? " · 参考价 ¥"+h.price+"（高德最低价 · 以预订平台为准）"
-          : " · 参考价 ¥"+v+"（按"+(h.star?(h.star+"星级"):"同型")+"基准估算）";
-        return {
-          id:"c-"+key+"-hotel"+i, name:h.n, cat:"hotel",
-          x:h.x, y:h.y, city:src.name,
-          addr:h.addr||"",                                        /* 真实地址 · 每日行程卡片标注 */
-          stay:"一晚",
-          econ:hasPrice?Math.round(+h.price):v,
-          comfort:hasPrice?Math.round(+h.price*1.3):Math.round(v*1.3),
-          pn:(h.addr||"")+(h.r?(" · 评分 "+h.r):"")+priceNote,
-          desc:"地址："+(h.addr||"暂无")+(h.r?(" · 评分 "+h.r):"")
-            +" · 类型："+tname+" · 数据源：高德地图 POI"+(hasPrice?"（含最低价）":"（价格按星级基准）"),
-          reason:"高德地图真实住宿 · 真实坐标落点"+(h.star?(" · "+h.star+"星级"):""),
-          src:"🏨 高德地图 POI 真实数据 · 价格以预订平台为准",
-          amapHotel:true, priceMissing:!hasPrice, amapId:(h.id||""),
-          /* v14.0 新增：供筛选/排序与「按档次替换」逻辑使用 */
-          star:h.star||null, hotelKind:h.kind||"hotel", realPrice:hasPrice?Math.round(+h.price):null
-        };
-      });
-      pois.length=0; pois.push(...others,...hpois);
+    /* 高德 POI 真实住宿替换（data-hotels.js 快照 · 名称/地址/坐标/评分/星级真实）
+       ---------------- v15.0：五档分层 + 三级价格显示 ----------------
+       用户诉求：修复「价格虚高 / 缺青旅民宿 / 档位不全」。
+       分层规则：星级优先（高德权威），无星级才按名称关键词判定 —— 避免
+                 「4 星客栈」被名字里的「客栈」压成民宿价（实测会低估约 40%）。
+       价格规则：① 有高德最低价 → 真实起价「¥XXX 起（参考起价）」
+                 ② 无价 → 按档位显示参考区间，价格数值取区间中值做预算测算
+                 ③ 连档位都判不出 → 「价位待确认」+ 跳转按钮
+       ⚠️ 本段只决定「酒店分类与价格显示」，不改动 econ/comfort 之外任何字段，
+          因此地图落点、路线规划、预算联动、接驳联动均不受影响。 */
+    /* 五档 → 参考区间（用户给定）与基准价（取区间中值，用于预算测算）
+       v15.1：青旅区间由 ¥100–150 下调至 ¥60–120（基准 ¥120→¥90），
+              以便预算型用户能选到真正的低价床位。 */
+    const HCLASS = {
+      youth:   { name:"青旅",   lo:60,  hi:120, base:90,   cls:"t-youth"   },
+      bnb:     { name:"民宿",   lo:150, hi:500, base:300,  cls:"t-bnb"     },
+      econ:    { name:"经济型", lo:200, hi:400, base:300,  cls:"t-econ"    },
+      comfort: { name:"舒适型", lo:400, hi:800, base:600,  cls:"t-comfort" },
+      premium: { name:"高档",   lo:800, hi:null, base:1100, cls:"t-premium" }
+    };
+    /* 无价时按档位给数值：基准价 × 评分微调（同档内口碑好的略贵，±12%） */
+    const rateAdj=h=>{
+      const r=parseFloat(h.r);
+      if(!isFinite(r) || r<=0) return 1;
+      return 1 + Math.max(-0.12, Math.min(0.12, (r-4.3)/4.7*0.24));
+    };
+    /* 档位判定：与抓取脚本 classifyTier 保持同一套规则（星级优先 → 名称 → 形态兜底）
+       民宿关键词严格限定为「民宿|客栈|小院|之家」，放宽会导致民宿占比虚高 */
+    const RE_YOUTH=/青旅|青年旅舍|青年旅社|国际青年/;
+    const RE_BNB=/民宿|客栈|小院|之家/;
+    const RE_ECON=/快捷|如家|汉庭|7天|锦江之星|格林豪泰|莫泰|速8|城市便捷/;
+    const RE_PREMIUM=/度假|希尔顿|洲际|万豪|凯悦|香格里拉|丽思卡尔顿|威斯汀|喜来登|君悦|柏悦|四季|文华东方|安缦|悦榕庄|瑰丽|华尔道夫|康莱德|索菲特|铂尔曼|温德姆|瑞吉|艾迪逊/;
+    const hclassOf=h=>{
+      if(h.hclass && HCLASS[h.hclass]) return h.hclass;      /* 抓取时已判好 → 直接用 */
+      if(h.star===5 || h.star===6) return "premium";         /* 星级优先 */
+      if(h.star===4 || h.star===3) return "comfort";
+      const n=h.n||"";
+      if(RE_YOUTH.test(n))   return "youth";
+      if(RE_PREMIUM.test(n)) return "premium";
+      if(RE_ECON.test(n))    return "econ";
+      if(RE_BNB.test(n))     return "bnb";
+      if(/酒店|大酒店|宾馆|饭店|大厦|山庄/.test(n)) return "comfort";
+      if(h.kind==="hostel")        return "youth";
+      if(h.kind==="guesthouse")    return "comfort";
+      if(h.kind==="economy-chain") return "econ";
+      return "comfort";
+    };
+    const others=pois.filter(p=>p.cat!=="hotel");
+    /* 每档最多取 N 家，保证五档都有代表（按抓取时的分组顺序切片，同档内已按评分降序）*/
+    const PER_TIER=4, hs=window.CITY_HOTELS[key];
+    const byTier={youth:[],bnb:[],econ:[],comfort:[],premium:[]};
+    hs.forEach(h=>{ const c=hclassOf(h); (byTier[c]||byTier.comfort).push(h); });
+    const picked=[];
+    ["youth","bnb","econ","comfort","premium"].forEach(c=>{
+      byTier[c].slice(0,PER_TIER).forEach(h=>{ h.__cls=c; picked.push(h); });
+    });
+    /* 若某档不足（数据稀疏城市），用剩余候选按价格就近补齐，避免出现空档 */
+    if(picked.length<14){
+      const used=new Set(picked.map(h=>h.id));
+      hs.forEach(h=>{ if(picked.length<14 && !used.has(h.id)){ used.add(h.id); h.__cls=hclassOf(h); picked.push(h); } });
     }
-    /* 低于 ¥100 的住宿不显示（硬过滤 · 在档位分桶前剔除） */
-    city.pois = pois.filter(p=>p.cat!=="hotel" || (p.econ>=100 && p.comfort>=100));
+    const hpois=picked.map((h,i)=>{
+      const hasPrice=!!(h.price && +h.price>0);
+      const cls=h.__cls || hclassOf(h);
+      const band=HCLASS[cls] || HCLASS.comfort;
+      const v=hasPrice ? Math.round(+h.price) : Math.round(band.base*rateAdj(h));
+      const tname=band.name;
+      /* 三级价格文案 */
+      const rangeTxt=band.hi ? ("¥"+band.lo+"–¥"+band.hi) : ("¥"+band.lo+" 以上");
+      const priceNote=hasPrice
+        ? " · ¥"+h.price+" 起（参考起价）"
+        : " · 参考区间 "+rangeTxt+"（以预订平台为准）";
+      return {
+        id:"c-"+key+"-hotel"+i, name:h.n, cat:"hotel",
+        x:h.x, y:h.y, city:src.name,
+        addr:h.addr||"",                                        /* 真实地址 · 每日行程卡片标注 */
+        stay:"一晚",
+        /* econ/comfort 仅用于既有预算测算，取值口径不变（仍是数字） */
+        econ:hasPrice?Math.round(+h.price):v,
+        comfort:hasPrice?Math.round(+h.price*1.3):Math.round(v*1.25),
+        pn:(h.addr||"")+(h.r?(" · 评分 "+h.r):"")+priceNote,
+        desc:"地址："+(h.addr||"暂无")+(h.r?(" · 评分 "+h.r):"")
+          +" · 类型："+tname+" · 数据源：高德地图 POI"+(hasPrice?"（含最低价）":"（价格按档位区间）"),
+        reason:"高德地图真实住宿 · 真实坐标落点"+(h.star?(" · "+h.star+"星级"):""),
+        src:"🏨 高德地图 POI 真实数据 · 价格以预订平台为准",
+        amapHotel:true, priceMissing:!hasPrice, amapId:(h.id||""),
+        /* v15：供筛选/排序/卡片渲染使用 */
+        star:h.star||null, hotelKind:h.kind||"hotel",
+        realPrice:hasPrice?Math.round(+h.price):null,
+        hotelClass:cls, hotelClassName:tname, hotelClassCls:band.cls,
+        priceLo:band.lo, priceHi:band.hi,
+        priceTier: hasPrice ? "real" : "range",      /* real=真实起价 / range=参考区间 */
+        priceText: hasPrice ? ("¥"+h.price+" 起") : (band.hi?("¥"+band.lo+"–¥"+band.hi):("¥"+band.lo+" 以上")),
+        priceCaption: hasPrice ? "参考起价" : "参考区间，以预订平台为准"
+      };
+    });
+    pois.length=0; pois.push(...others,...hpois);
+    /* v15.1 价格硬约束：¥60 以下与 ¥5000 以上的住宿不显示
+       （下限随青旅区间下调同步对齐：青旅 ¥60 起，若仍卡 ¥100 会把最低价青旅全滤掉）*/
+    city.pois = pois.filter(p=>p.cat!=="hotel" || (p.econ>=60 && p.econ<=5000 && p.comfort>=60 && p.comfort<=5000));
     city.featured = true;
     city.hub = src.hubs;
     city.reason = src.reason;
@@ -1568,6 +1617,8 @@ function rateOf(cityKey,cat,grade){
 function tierTag(p){
   if(p&&p.cat==="hotel"&&p.tier&&HTIER_NAME[HTIER_ORDER[p.tier]]!==undefined)
     return `<span class="tier-tag t-${p.tier}">${HTIER_NAME[HTIER_ORDER[p.tier]]}</span>`;
+  if(p&&p.cat==="hotel"&&p.hotelClassName)
+    return `<span class="tier-tag ${p.hotelClassCls||"t-comfort"}">${p.hotelClassName}</span>`;
   const t=p&&p.tier?TIER[p.tier]:null;
   return t?`<span class="tier-tag t-${t.key}">${t.name}</span>`:"";
 }
@@ -1946,6 +1997,15 @@ function onMarkerClick(id){
   const cat=CAT[p.cat];
   $("icName").textContent=p.name;
   const tag=$("icTag"); tag.textContent=cat.name; tag.style.background=cat.bg; tag.style.color=cat.color;
+  /* v15.0：住宿卡片额外显示「类型标签」（青旅/民宿/经济型/舒适型/高档）*/
+  const hct=$("icHotelClass");
+  if(hct){
+    if(p.cat==="hotel" && p.hotelClassName){
+      hct.style.display="inline-block";
+      hct.textContent=p.hotelClassName;
+      hct.className="hotel-class-tag "+(p.hotelClassCls||"t-comfort");
+    } else { hct.style.display="none"; hct.textContent=""; }
+  }
   $("icDesc").textContent=p.desc;
   /* 超预算标注（v12.0）：手动机划与智能导入点一视同仁，只在卡片内提示，不删不改 */
   (function(){
@@ -1970,13 +2030,29 @@ function onMarkerClick(id){
   rowH.style.display="none"; rowF.style.display="none"; rowB.style.display="none";
   if(p.cat==="hotel"){
     rowH.style.display="flex";
-    $("icHotel").textContent=(p.pn||"").replace(/\s*⏳\s*$/,"")+"（经济/舒适两档均按此区间测算）";
-    /* 预订入口：价格以预订平台为准 */
+    /* v15.0 卡片价格：三种形态统一由 priceTier 决定文案
+       real  = 高德有最低价 → 「¥XXX 起 · 参考起价」
+       range = 无价但有档位 → 「¥A–¥B · 参考区间，以预订平台为准」
+       unknown = 连档位都判不出（非高德来源的极少数）→ 「价位待确认」+ 跳转 */
+    const pTier = p.priceTier || (p.priceMissing?"range":"real");
+    let hotelTxt;
+    if(pTier==="real" && p.realPrice){
+      hotelTxt = "¥"+p.realPrice+" 起　·　参考起价";
+    } else if(pTier==="range" && p.priceLo){
+      hotelTxt = (p.priceHi? ("¥"+p.priceLo+" – ¥"+p.priceHi) : ("¥"+p.priceLo+" 以上"))
+               + "　·　参考区间，以预订平台为准";
+    } else {
+      hotelTxt = "价位待确认";
+    }
+    $("icHotel").textContent=hotelTxt;
+    /* 预订入口：跳转按钮（价格以预订平台为准）*/
     const bk=$("icBook"), rowB=$("icRowBook");
     if(bk && rowB){
       rowB.style.display="flex";
       bk.href="https://www.ly.com/hotel/hotellist/?keyword="+encodeURIComponent(p.name);
-      bk.textContent=p.priceMissing? "高德未返回参考价 · 去预订平台查实时价 →" : "价格以预订平台为准 · 去预订 →";
+      bk.textContent = pTier==="unknown" || !p.priceLo
+        ? "去预订平台查实时价 →"
+        : "价格以预订平台为准 · 去预订 →";
     }
   } else if(p.cat==="food"){
     rowF.style.display="flex";
@@ -4489,7 +4565,7 @@ $("plansNew").onclick=()=>{
 /* ---------- 打开已保存方案：完整还原 ---------- */
 function openPlan(id){
   const p=PLANS.find(x=>x.id===id); if(!p){ toast("方案不存在"); return; }
-  state.days=p.days; state.budget=p.budget; state.roomBudget=Math.max(100,p.roomBudget||800); state.mode=p.mode; state.from=p.from;
+  state.days=p.days; state.budget=p.budget; state.roomBudget=Math.max(60,p.roomBudget||800); state.mode=p.mode; state.from=p.from;
   $("fromInput").value=p.from;
   if(p.depAt) $("depAt").value=p.depAt;
   if(p.retAt) $("retAt").value=p.retAt;
