@@ -1,0 +1,6 @@
+{
+  "$schema": "https://edgeone.ai/schema/edgeone.json",
+  "buildCommand": "node sync-index.cjs",
+  "outputDirectory": ".",
+  "nodeVersion": "20.18.0"
+}

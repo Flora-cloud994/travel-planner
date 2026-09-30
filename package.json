@@ -1,6 +1,6 @@
 {
   "name": "travel-planner",
-  "version": "13.1.0",
+  "version": "16.0.0",
   "private": true,
   "description": "智能旅行规划器 —— 粘贴攻略文本 / 上传截图，自动识别地点、落到真实坐标并生成行程。Key 全部由服务端代理持有。",
   "engines": {
@@ -9,11 +9,7 @@
   "scripts": {
     "sync": "node sync-index.cjs",
     "check": "node sync-index.cjs --check",
-    "dev": "vercel dev",
-    "deploy": "vercel --prod"
-  },
-  "dependencies": {},
-  "devDependencies": {
-    "vercel": "^39.0.0"
+    "dev": "edgeone makers dev",
+    "deploy": "edgeone makers deploy"
   }
 }
