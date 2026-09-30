@@ -1,0 +1,17 @@
+{
+  "name": "travel-planner",
+  "version": "13.0.0",
+  "private": true,
+  "description": "智能旅行规划器 —— 粘贴攻略文本 / 上传截图，自动识别地点、落到真实坐标并生成行程。Key 全部由服务端代理持有。",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "dev": "vercel dev",
+    "deploy": "vercel --prod"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "vercel": "^39.0.0"
+  }
+}

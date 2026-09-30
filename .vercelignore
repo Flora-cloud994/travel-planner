@@ -1,0 +1,5 @@
+# 不部署到 Vercel 的文件（本地工具与测试基建）
+.workbuddy/
+.env
+.env.local
+*.log
