@@ -5050,7 +5050,7 @@ function chat(body, type){
   })
     .then(r=>{
       clearTimeout(timer);
-      if(!r.ok) return r.text().then(t=>{ throw new Error("HTTP "+r.status+" "+String(t).slice(0,180)); });
+      if(!r.ok) return r.text().then(t=>{ throw new Error("HTTP "+r.status+" "+String(t).slice(0,400)); });
       return r.json();
     })
     .then(d=>{
@@ -5556,6 +5556,21 @@ function generate(){
     }else if(msg==="NO_KEY"){
       setRes('<div class="ai-note bad">🔑 识别服务未就绪</div>'
         +'<div class="ai-note" style="margin-top:8px">服务端未配置 API Key，请检查部署环境变量（见项目 README）。</div>');
+      toggleCfg(true);
+    }else if(/401|403/.test(msg) && /Protected|vercel_auth|Authentication/i.test(msg)){
+      /* v13.3：Vercel 部署保护拦截 —— 这是最容易误判为「网络问题」的一种失败，
+         故单独给出可操作的指引，避免用户在环境变量上反复试错。 */
+      setRes('<div class="ai-note bad">🔒 接口被 Vercel 部署保护拦截（HTTP 401）</div>'
+        +'<div class="ai-note" style="margin-top:8px">这不是网络或 Key 的问题：项目开启了 <b>Deployment Protection</b>，'
+        +'导致浏览器发出的接口请求被要求登录。请到 Vercel 项目 → <b>Settings → Deployment Protection</b>，'
+        +'把保护范围从 <b>All Deployments</b> 改为 <b>Standard Protection</b>（或 Disabled），保存后无需重新部署即生效。</div>');
+      toggleCfg(true);
+    }else if(/401/.test(msg) && /api key|apikey|invalid_api_key|Incorrect/i.test(msg)){
+      /* 上游 Key 无效（阿里云原样返回）—— 与「保护拦截」区分开 */
+      setRes('<div class="ai-note bad">🔑 上游 API Key 无效（HTTP 401）</div>'
+        +'<div class="ai-note" style="margin-top:8px">服务端已收到请求，但阿里云拒绝了该 Key。请确认环境变量 '
+        +'<code>DASHSCOPE_KEY</code> 填的是<b>百炼控制台</b>的 API-KEY（形如 <code>sk-</code> + 32 位十六进制），'
+        +'而不是 RAM 的 AccessKey 或其它凭证。</div>');
       toggleCfg(true);
     }else{
       setRes('<div class="ai-note bad">❌ 识别失败，请检查网络或稍后重试</div>'
