@@ -1,7 +1,8 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "version": 2,
+  "framework": null,
   "buildCommand": "node sync-index.cjs",
+  "outputDirectory": ".",
   "functions": {
     "api/proxy.mjs": {
       "memory": 512,

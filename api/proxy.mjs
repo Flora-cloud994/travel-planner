@@ -35,6 +35,12 @@ const AMAP_ALLOW_PATHS = new Set([
    （防止前端被篡改成任意查询 / 注入 &key= 之类） */
 const TMAP_ALLOW_PARAMS = new Set(["keyword", "boundary", "page_size", "page_index"]);
 
+/* 高德「由服务端保留」的参数名：这些一律不接受前端传入，
+   避免前端塞 key=xxx 覆盖服务端 Key（参数注入）。
+   注意：高德部分接口确实用 key 作为业务参数（如某些位置描述），
+   但本项目用到的 place/text 与 direction/* 均不需要，故一律屏蔽。 */
+const AMAP_RESERVED_PARAMS = new Set(["key", "output"]);
+
 function setCors(res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
@@ -104,6 +110,7 @@ async function forwardAmap(payload, res) {
   const params = (payload && payload.params && typeof payload.params === "object") ? payload.params : {};
   const qs = Object.keys(params)
     .filter((k) => params[k] !== undefined && params[k] !== null)
+    .filter((k) => !AMAP_RESERVED_PARAMS.has(k))
     .map((k) => encodeURIComponent(k) + "=" + encodeURIComponent(String(params[k])))
     .join("&");
   const url = AMAP_BASE + "/" + path + "?key=" + encodeURIComponent(process.env.AMAP_KEY) + "&output=json" + (qs ? "&" + qs : "");
