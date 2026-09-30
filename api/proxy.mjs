@@ -4,10 +4,11 @@
    作用：把 API Key 全部收敛到服务端环境变量，前端不再持有任何 Key。
 
    环境变量（在 Vercel 项目 Settings → Environment Variables 配置）：
-     · DEEPSEEK_KEY  —— DeepSeek 开放平台 API Key（文本识别，主用）
-     · DASHSCOPE_KEY —— 阿里云百炼（DashScope）API Key（可选：仅用于截图识别）
-                        若配置了，截图走千问视觉模型；未配置则截图功能自动禁用，
-                        文本识别不受影响。
+     · DEEPSEEK_KEY  —— DeepSeek 开放平台 API Key（文本识别，必填）
+     · ZHIPU_KEY     —— 智谱 AI API Key（截图识别，推荐）
+                        或 DASHSCOPE_KEY —— 阿里云百炼 API Key（截图识别，备选）
+                        两者**任配其一**即可启用截图识别；都未配置时该功能自动禁用，
+                        文本识别不受影响。优先级：ZHIPU_KEY > DASHSCOPE_KEY。
      · AMAP_KEY      —— 高德开放平台「Web 服务」类型 Key
      · TMAP_KEY      —— 腾讯位置服务 Key（可选，用于到达点搜索）
 
@@ -15,7 +16,8 @@
      { "type": "qwen-text",   "body": { model, messages, ... } }   → 文本模型
         （服务端会强制把 model 重写为 DEEPSEEK_MODEL，前端传的 model 不生效）
      { "type": "qwen-image",  "body": { model, messages, ... } }   → 视觉模型
-        （走 DASHSCOPE_KEY + 千问视觉模型；未配 DASHSCOPE_KEY 时返回明确错误）
+        （服务端按已配置的 Key 选择上游：智谱 GLM-4V 或 千问 VL；
+           body 沿用 OpenAI 兼容的多模态格式，两家的格式一致，故前端无需区分）
      { "type": "amap-search", "path": "place/text", "params": {…} } → 高德 POI 搜索
         （amap 通道向后兼容 "endpoint" 字段，等价于 "path"）
      { "type": "tmap-search", "params": "keyword=…&boundary=…" }   → 腾讯地图 POI 搜索
@@ -29,8 +31,13 @@
 const DEEPSEEK_BASE = "https://api.deepseek.com";
 const DEEPSEEK_MODEL = "deepseek-chat";
 
-/* 阿里云百炼：仅用于视觉（截图）识别 */
+/* 智谱 AI：视觉（截图）识别首选。端点与请求格式同为 OpenAI 兼容。 */
+const ZHIPU_BASE = "https://open.bigmodel.cn/api/paas/v4";
+const ZHIPU_VISION_MODEL = "glm-4v-plus";
+
+/* 阿里云百炼：视觉（截图）识别备选 —— 仅当未配 ZHIPU_KEY 且配了 DASHSCOPE_KEY 时启用 */
 const DASHSCOPE_BASE = "https://dashscope.aliyuncs.com/compatible-mode/v1";
+const DASHSCOPE_VISION_MODEL = "qwen-vl-plus";
 
 const AMAP_BASE = "https://restapi.amap.com/v3";
 const TMAP_BASE = "https://apis.map.qq.com/ws/place/v1/search";
@@ -65,6 +72,18 @@ function json(res, status, obj) {
   res.end(JSON.stringify(obj));
 }
 
+/* 视觉通道选择：智谱优先，其次千问；都没配则返回 null（表示功能未启用）。
+   两家均为 OpenAI 兼容的多模态格式，故前端请求体可直接复用。 */
+function pickVisionChannel() {
+  if (process.env.ZHIPU_KEY) {
+    return { name: "zhipu", base: ZHIPU_BASE, model: ZHIPU_VISION_MODEL, key: process.env.ZHIPU_KEY };
+  }
+  if (process.env.DASHSCOPE_KEY) {
+    return { name: "dashscope", base: DASHSCOPE_BASE, model: DASHSCOPE_VISION_MODEL, key: process.env.DASHSCOPE_KEY };
+  }
+  return null;
+}
+
 /* 前置校验：type 是否合法、Key 是否已配置 */
 function validate(type) {
   if (type === "qwen-text") {
@@ -74,13 +93,18 @@ function validate(type) {
     return { ok: true };
   }
   if (type === "qwen-image") {
-    /* 视觉识别走千问；未配 DASHSCOPE_KEY 时明确告知「截图功能不可用」，
+    /* 视觉识别需智谱或千问任一 Key；都未配时明确告知「截图功能不可用」，
        而不是笼统报错 —— 文本识别不依赖它。 */
-    if (!process.env.DASHSCOPE_KEY) {
+    if (!pickVisionChannel()) {
       return {
         ok: false,
         status: 503,
-        obj: { error: { message: "服务端未配置 DASHSCOPE_KEY，截图识别功能不可用（文本识别不受影响）", code: "vision_unavailable" } }
+        obj: {
+          error: {
+            message: "服务端未配置 ZHIPU_KEY 或 DASHSCOPE_KEY，截图识别功能不可用（文本识别不受影响）",
+            code: "vision_unavailable"
+          }
+        }
       };
     }
     return { ok: true };
@@ -127,14 +151,25 @@ async function forwardDeepSeek(payload, res) {
   res.end(text);
 }
 
-/* ---------------- 视觉转发（阿里云百炼，仅截图识别用） ---------------- */
-async function forwardQwenVision(payload, res) {
-  const body = payload.body && typeof payload.body === "object" ? payload.body : payload;
-  const upstream = await fetch(DASHSCOPE_BASE + "/chat/completions", {
+/* ---------------- 视觉转发（截图识别） ----------------
+   上游按 pickVisionChannel() 选择：智谱 GLM-4V 或 千问 VL。
+   两家请求格式一致（OpenAI 兼容多模态），故这里统一处理，
+   并把 model 重写为所选通道的模型名（前端传的 model 不生效）。 */
+async function forwardVision(payload, res) {
+  const ch = pickVisionChannel();
+  if (!ch) {
+    /* 双保险：validate 已拦过，这里再兜一次 */
+    return json(res, 503, {
+      error: { message: "服务端未配置 ZHIPU_KEY 或 DASHSCOPE_KEY，截图识别功能不可用", code: "vision_unavailable" }
+    });
+  }
+  const raw = payload.body && typeof payload.body === "object" ? payload.body : payload;
+  const body = Object.assign({}, raw, { model: ch.model });
+  const upstream = await fetch(ch.base + "/chat/completions", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: "Bearer " + process.env.DASHSCOPE_KEY
+      Authorization: "Bearer " + ch.key
     },
     body: JSON.stringify(body)
   });
@@ -225,7 +260,7 @@ export default async function handler(req, res) {
       return await forwardDeepSeek(payload, res);
     }
     if (type === "qwen-image") {
-      return await forwardQwenVision(payload, res);
+      return await forwardVision(payload, res);
     }
     if (type === "tmap-search") {
       return await forwardTmap(payload, res);

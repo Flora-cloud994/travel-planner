@@ -10,7 +10,7 @@
 
 | 模块 | 说明 |
 | --- | --- |
-| 智能导入 | 千问文本 / 视觉模型抽取地点 → 高德 POI 搜索定位真实坐标 → 分天聚类连线 |
+| 智能导入 | DeepSeek 文本 / 多模态模型抽取地点 → 高德 POI 搜索定位真实坐标 → 分天聚类连线 |
 | 地图交互 | 腾讯地图底图，地点标记、路线、拖拽排序 |
 | 预算联动 | 总预算 + 每晚房费上限，超预算自动标灰、自动替换同城更便宜住宿 |
 | 接驳联动 | 到达点（车站 / 机场）→ 首晚酒店的公交 / 打车方案，费用计入预算 |
@@ -35,9 +35,9 @@ Vercel Serverless（api/proxy.mjs，持有 Key）
 **四种 `type` 的请求格式：**
 
 ```js
-// 千问文本 / 视觉（body 为 OpenAI 兼容请求体）
+// 文本 / 视觉（body 为 OpenAI 兼容请求体）
 { type: "qwen-text",  body: { model: "qwen-plus",    messages: [...] } }
-{ type: "qwen-image", body: { model: "qwen-vl-plus", messages: [...] } }
+{ type: "qwen-image", body: { model: "glm-4v-plus", messages: [...] } }  // model 由服务端重写
 
 // 高德 POI 搜索
 { type: "amap-search", path: "place/text", params: { keywords: "丽江古城", citylimit: "false" } }
@@ -58,13 +58,15 @@ Vercel Serverless（api/proxy.mjs，持有 Key）
 | --- | --- | --- | --- |
 | `DEEPSEEK_KEY` | **文本识别**（粘贴攻略文案 → 抽取地点） | **必填** | https://platform.deepseek.com/api_keys |
 | `AMAP_KEY` | 高德地点搜索 / 路线规划 | **必填** | 高德开放平台 → 应用管理 → 添加 Key，**服务平台必须选「Web服务」** |
-| `DASHSCOPE_KEY` | **截图识别**（图片 → 抽取地点） | 可选 | 阿里云百炼控制台 → **API-KEY 管理**（格式：`sk-` + 32 位十六进制） |
+| `ZHIPU_KEY` | **截图识别**（图片 → 抽取地点） | 可选 | https://open.bigmodel.cn/ → API 密钥管理 |
+| `DASHSCOPE_KEY` | 截图识别（备选，仅当未配 `ZHIPU_KEY` 时启用） | 可选 | 阿里云百炼控制台 → **API-KEY 管理**（`sk-` + 32 位十六进制） |
 | `TMAP_KEY` | 腾讯地图「到达点搜索」 | 可选 | 腾讯位置服务 → 应用管理 → 添加 Key，勾选 **WebService API** |
 
 > 高德 Key 若选成「Web端(JS API)」，服务端调用会报 `USERKEY_PLAT_NOMATCH`。
 >
-> **`DASHSCOPE_KEY` 可以不填**（v13.4 起）：因为 DeepSeek 没有视觉模型，截图识别仍走千问。
-> 不填时「🖼 上传截图」功能会自动禁用并在页面上明确提示，**「📝 攻略文本」识别完全不受影响**，其余功能全部正常。
+> **截图识别的 Key 可以不填**：视觉模型走智谱 GLM-4V（优先）或千问 VL（备选），
+> 两者**任配其一**即可。都未配置时「🖼 上传截图」会自动禁用并在页面上明确提示，
+> **「📝 攻略文本」识别完全不受影响**，其余功能全部正常。
 >
 > **`TMAP_KEY` 可以不填**：不填时「到达点搜索」搜不到结果，接驳方案退化为按坐标距离估算（费用与时间仍正常显示），其余功能不受影响。
 
@@ -88,7 +90,7 @@ git push -u origin main
 3. 展开 **Environment Variables**，添加：
    - `DEEPSEEK_KEY` = 你的 DeepSeek Key（**必填**，用于文本识别）
    - `AMAP_KEY` = 你的高德 Web 服务 Key（**必填**）
-   - `DASHSCOPE_KEY` = 你的阿里云百炼 Key（可选，仅截图识别用）
+   - `ZHIPU_KEY` = 你的智谱 AI Key（可选，截图识别用；也可改用 DASHSCOPE_KEY）
    - `TMAP_KEY` = 你的腾讯位置服务 Key（**可选**，不填则「到达点搜索」不可用）
 4. 点 **Deploy**，等待完成。
 
@@ -140,7 +142,7 @@ npm run dev          # 启动 vercel dev，默认 http://localhost:3000
 
 ## 六、安全说明
 
-- 前端**不含任何 API Key**（千问 / 高德 / 腾讯三个 Key 全部在服务端），也不提供 Key 输入框；Key 只存在于 Vercel 环境变量与已 gitignore 的本地 `.env`。
+- 前端**不含任何 API Key**（DeepSeek / 智谱 / 高德 / 腾讯的 Key 全部在服务端），也不提供 Key 输入框；Key 只存在于 Vercel 环境变量与已 gitignore 的本地 `.env`。
 - 建议在 DashScope、高德、腾讯位置服务控制台分别设置**每日调用上限 / 流量限制**，防止 Key 被滥用。
 - 如需限制使用范围，可在 `api/proxy.mjs` 的 `setCors` 中把 `Access-Control-Allow-Origin` 由 `*` 改为你的域名。
 
@@ -160,7 +162,7 @@ npm run dev          # 启动 vercel dev，默认 http://localhost:3000
 对应环境变量缺失或拼写错误。用于文本识别，必填。
 
 **Q：截图识别提示「未启用」？**
-截图走阿里云百炼视觉模型（DeepSeek 无视觉能力）。需配置 `DASHSCOPE_KEY`，
+截图走智谱 GLM-4V（优先）或千问 VL（备选）—— DeepSeek 无视觉能力。需配置 `ZHIPU_KEY` 或 `DASHSCOPE_KEY`，
 格式为 `sk-` + 32 位十六进制。**不配不影响文本识别。**
 
 **Q：提示「上游 API Key 无效（HTTP 401）」？**

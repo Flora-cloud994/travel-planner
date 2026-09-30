@@ -831,7 +831,7 @@ mark.hl{background:rgba(224,168,0,.28);color:inherit;border-radius:3px;padding:0
     <!-- Tab 二：上传截图 -->
     <div class="ai-pane" id="aiPaneShot">
       <div class="ai-zone">
-        <h4>🖼 攻略截图 <span class="tag">qwen-vl-plus · 可选</span></h4>
+        <h4>🖼 攻略截图 <span class="tag">glm-4v-plus</span></h4>
         <div class="ai-drop" id="aiDrop">
           <span class="ic">📷</span>
           <span class="t1">点击上传，或 Ctrl+V 粘贴截图</span>
@@ -4998,9 +4998,10 @@ const CFG={
   /* 后端代理地址：所有模型请求都经此转发（同源相对路径，自动适配部署域名） */
   proxy:"/api/proxy",
   /* v13.4：文本识别改用 DeepSeek（服务端会强制重写 model，此处仅作展示与兜底）。
-     截图识别仍走阿里云百炼视觉模型，需服务端配置 DASHSCOPE_KEY，否则该功能自动禁用。 */
+     v13.5：截图识别改为智谱 GLM-4V（服务端同样会重写 model）。
+            服务端未配置 ZHIPU_KEY / DASHSCOPE_KEY 时该功能自动禁用。 */
   textModel:"deepseek-chat",
-  visionModel:"qwen-vl-plus", /* 视觉读图模型（直接读图，无需先 OCR） */
+  visionModel:"glm-4v-plus",  /* 视觉读图模型（直接读图，无需先 OCR） */
   timeout:90000               /* 单次请求超时（ms） */
 };
 /* ⚠️ CFG 必须定义在主脚本最外层、且在 loadProv() 之前 ——
@@ -5108,7 +5109,8 @@ function qwenTextExtract(text){
     return normExtract(obj);
   });
 }
-/* 公共：图片抽取（模型 qwen-vl-plus；base64 为 readAsDataURL 逗号之后的部分） */
+/* 公共：图片抽取（视觉模型由服务端选择：智谱 GLM-4V 或 千问 VL
+   base64 为 readAsDataURL 逗号之后的部分） */
 function qwenVisionExtract(base64, mime){
   const url="data:"+(mime||"image/png")+";base64,"+base64;
   return chat({
@@ -5428,9 +5430,10 @@ document.addEventListener("keydown",e=>{
 
 /* ---------- 截图：点击上传 + Ctrl+V 粘贴剪贴板 ---------- */
 const drop=$("aiDrop"), file=$("aiFile");
-const IMG_MAX=1600;                    /* 长边上限（qwen-vl 超大图易失败） */
+const IMG_MAX=1600;                    /* 长边上限（避免超大图浪费带宽 / 触发上游体积限制） */
+const IMG_MIN_SIDE=720;                /* 短边上限：GLM-4V 要求短边 < 768px，留余量取 720 */
 function fmtSize(n){ return n>1048576 ? (n/1048576).toFixed(1)+" MB" : Math.round(n/1024)+" KB"; }
-/* 压缩 + 转 base64：长边 ≤ IMG_MAX，输出 JPEG(有透明则 PNG) */
+/* 压缩 + 转 base64：长边 ≤ IMG_MAX 且短边 ≤ IMG_MIN_SIDE，输出 JPEG(有透明则 PNG) */
 function readImage(f){
   return new Promise((res,rej)=>{
     if(!f || !/^image\//.test(f.type||"")) return rej(new Error("仅支持图片文件（PNG / JPG / WEBP）"));
@@ -5442,8 +5445,11 @@ function readImage(f){
       img.onload=()=>{
         const w0=img.naturalWidth, h0=img.naturalHeight;
         if(!w0 || !h0) return rej(new Error("图片尺寸异常"));
-        const scale=Math.min(1, IMG_MAX/Math.max(w0,h0));
-        const w=Math.round(w0*scale), h=Math.round(h0*scale);
+        /* 同时满足「长边 ≤ IMG_MAX」与「短边 ≤ IMG_MIN_SIDE」→ 取更严格的那个缩放比；
+           图本已足够小时不放大（scale 上限 1）。GLM-4V 对短边有硬限制，故这里必须按短边也压。 */
+        const long0=Math.max(w0,h0), short0=Math.min(w0,h0);
+        const scale=Math.min(1, IMG_MAX/long0, IMG_MIN_SIDE/short0);
+        const w=Math.max(1,Math.round(w0*scale)), h=Math.max(1,Math.round(h0*scale));
         const cv=document.createElement("canvas"); cv.width=w; cv.height=h;
         const ctx=cv.getContext("2d");
         const keepPng=/png/i.test(f.type||"");
@@ -5559,11 +5565,12 @@ function generate(){
       setRes('<div class="ai-note bad">🔑 识别服务未就绪</div>'
         +'<div class="ai-note" style="margin-top:8px">服务端未配置模型 API Key，请检查部署环境变量（见项目 README）。</div>');
       toggleCfg(true);
-    }else if(/vision_unavailable|DASHSCOPE_KEY/i.test(msg)){
-      /* v13.4：截图识别需要千问视觉模型；未配 DASHSCOPE_KEY 时该功能单独禁用，
-         不影响文本识别 —— 给出明确指引而非笼统报错。 */
+    }else if(/vision_unavailable|ZHIPU_KEY|DASHSCOPE_KEY/i.test(msg)){
+      /* v13.5：截图识别需要视觉模型（智谱 GLM-4V 或 千问 VL）；未配 Key 时该功能
+         单独禁用，不影响文本识别 —— 给出明确指引而非笼统报错。 */
       setRes('<div class="ai-note bad">🖼 截图识别未启用</div>'
-        +'<div class="ai-note" style="margin-top:8px">截图识别需要服务端配置 <code>DASHSCOPE_KEY</code>（阿里云百炼视觉模型）。'
+        +'<div class="ai-note" style="margin-top:8px">截图识别需要服务端配置视觉模型 Key：'
+        +'<code>ZHIPU_KEY</code>（智谱 GLM-4V，推荐）或 <code>DASHSCOPE_KEY</code>（阿里云千问 VL）。'
         +'<b>文本识别不受影响</b>，可直接用「📝 攻略文本」标签粘贴文字。</div>');
       toggleCfg(true);
     }else if(/401|403/.test(msg) && /Protected|vercel_auth|Authentication/i.test(msg)){
