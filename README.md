@@ -28,10 +28,11 @@ Vercel Serverless（api/proxy.js，持有 Key）
         │
         ├── type=qwen-text   → DashScope  /compatible-mode/v1/chat/completions
         ├── type=qwen-image  → DashScope  /compatible-mode/v1/chat/completions
-        └── type=amap-search → 高德        /v3/place/text 等
+        ├── type=amap-search → 高德        /v3/place/text 等
+        └── type=tmap-search → 腾讯地图    /ws/place/v1/search
 ```
 
-**三种 `type` 的请求格式：**
+**四种 `type` 的请求格式：**
 
 ```js
 // 千问文本 / 视觉（body 为 OpenAI 兼容请求体）
@@ -40,9 +41,12 @@ Vercel Serverless（api/proxy.js，持有 Key）
 
 // 高德 POI 搜索
 { type: "amap-search", path: "place/text", params: { keywords: "丽江古城", citylimit: "false" } }
+
+// 腾讯地图 POI 搜索（params 为已编码的查询串）
+{ type: "tmap-search", params: "keyword=丽江站&boundary=region(丽江市,0)&page_size=8" }
 ```
 
-高德通道有**路径白名单**（`place/text`、`direction/transit/integrated`、`direction/driving`），代理不会被当成任意请求转发器使用。
+高德通道有**路径白名单**（`place/text`、`direction/transit/integrated`、`direction/driving`），腾讯通道有**参数名白名单**（`keyword`/`boundary`/`page_size`/`page_index`），代理不会被当成任意请求转发器使用。
 
 ---
 
@@ -54,6 +58,7 @@ Vercel Serverless（api/proxy.js，持有 Key）
 | --- | --- | --- |
 | `DASHSCOPE_KEY` | 千问识别（文本 + 视觉） | 阿里云百炼控制台 → **API-KEY 管理** |
 | `AMAP_KEY` | 高德地点搜索 / 路线规划 | 高德开放平台 → 应用管理 → 添加 Key，**服务平台必须选「Web服务」** |
+| `TMAP_KEY` | 腾讯地图「到达点搜索」 | 腾讯位置服务 → 应用管理 → 添加 Key，勾选 **WebService API** |
 
 > 高德 Key 若选成「Web端(JS API)」，服务端调用会报 `USERKEY_PLAT_NOMATCH`。
 
@@ -74,9 +79,10 @@ git push -u origin main
 
 1. 登录 [vercel.com](https://vercel.com) → **Add New… → Project** → 选择上面的仓库；
 2. **Framework Preset** 选 `Other`（本项目的根目录 `travel-planner.html` 会作为静态页面自动部署，`api/proxy.js` 自动识别为 Serverless 函数）；
-3. 展开 **Environment Variables**，添加两条：
+3. 展开 **Environment Variables**，添加三条：
    - `DASHSCOPE_KEY` = 你的千问 Key
    - `AMAP_KEY` = 你的高德 Web 服务 Key
+   - `TMAP_KEY` = 你的腾讯位置服务 Key
 4. 点 **Deploy**，等待完成。
 
 部署完成后拿到形如 `https://xxx.vercel.app` 的地址，直接分享给任何人即可使用。
@@ -105,26 +111,30 @@ npm run dev          # 启动 vercel dev，默认 http://localhost:3000
 
 ```
 ├── api/
-│   └── proxy.js          # Serverless 代理：三种 type 转发，Key 从环境变量读取
+│   └── proxy.js          # Serverless 代理：四种 type 转发，Key 从环境变量读取
 ├── data/
 │   ├── data-coords.js    # 坐标修正表
 │   ├── data-yn.js        # 云南城市 POI 数据
 │   ├── data-gz.js        # 贵州城市 POI 数据
 │   ├── data-sc.js        # 四川城市 POI 数据
 │   └── data-hotels.js    # 住宿数据
-├── travel-planner.html   # 单文件前端（含全部 UI / 逻辑 / 样式）
-├── vercel.json           # Serverless 函数配置
+├── travel-planner.html   # 单文件前端（含全部 UI / 逻辑 / 样式）——★ 主文件，改这里
+├── index.html            # 由 travel-planner.html 自动同步生成（勿手改）
+├── sync-index.js         # 同步脚本（部署时自动运行）
+├── vercel.json           # Serverless 函数 + 构建命令配置
 ├── package.json
 ├── .env.example          # 环境变量清单（不含值）
 └── .gitignore
 ```
 
+> **为什么要两份 HTML**：Vercel 在根路径 `/` 默认找 `index.html`，而主文件叫 `travel-planner.html`。为了分享链接是不带文件名的 `https://xx.vercel.app`，需要一份同名副本。**只改 `travel-planner.html`**，然后跑 `npm run sync` 重新生成 `index.html`（部署时 Vercel 会通过 `buildCommand` 自动执行）。
+
 ---
 
 ## 六、安全说明
 
-- 前端**不含任何 API Key**，也不提供 Key 输入框；Key 只存在于 Vercel 环境变量与已 gitignore 的本地 `.env`。
-- 建议在 DashScope 与高德控制台分别设置**每日调用上限 / 流量限制**，防止 Key 被滥用。
+- 前端**不含任何 API Key**（千问 / 高德 / 腾讯三个 Key 全部在服务端），也不提供 Key 输入框；Key 只存在于 Vercel 环境变量与已 gitignore 的本地 `.env`。
+- 建议在 DashScope、高德、腾讯位置服务控制台分别设置**每日调用上限 / 流量限制**，防止 Key 被滥用。
 - 如需限制使用范围，可在 `api/proxy.js` 的 `setCors` 中把 `Access-Control-Allow-Origin` 由 `*` 改为你的域名。
 
 ---

@@ -1,13 +1,11 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "version": 2,
+  "buildCommand": "node sync-index.js",
   "functions": {
     "api/proxy.js": {
       "memory": 512,
       "maxDuration": 60
     }
-  },
-  "rewrites": [
-    { "source": "/api/proxy", "destination": "/api/proxy" }
-  ]
+  }
 }
