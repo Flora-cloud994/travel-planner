@@ -1675,14 +1675,18 @@ const $ = id => document.getElementById(id);
 const fmt = n => "¥" + Math.round(n).toLocaleString("zh-CN");
 
 /* ================================================================
-   v17.0 地图「仅导入点」显示模式 + 每日聚焦
+   v17.0 地图「仅导入点」显示模式 + 每日聚焦 → v17.1 完整路线显示
    ----------------------------------------------------------------------------
-   需求：
+   需求（v17.0）：
      ① 地图默认只显示「导入 / 搜索生成」的图标，数据库内置点隐藏；
      ② 搜索结果点立即可见（生成新点）；
      ③ 点击每日行程卡片 → 地图飞到当天点位并临时显示 / 高亮；
      ④ 颜色分类不变（绿=景点 蓝=住宿 紫=美食）；
      ⑤ 路线规划区分起点 / 终点（徽章 + 悬浮标签）。
+   需求（v17.1 迭代）：
+     ⑥ 地图展示完整的路线图标（整条生效路线上的点全部显示，非仅首尾）；
+     ⑦ 每日规划的每一个地点都能链接底图图标（日程点 + 各晚酒店，
+       即使不在当前路线里也显示）。
    实现口径：
      · USER_ADDED：本会话内经「搜索 / AI 导入 / 粘贴」采用的点位 id 集合
        （含导入命中本地库的点 —— 它们没有 live 标记，必须显式登记）；
@@ -1691,8 +1695,10 @@ const fmt = n => "¥" + Math.round(n).toLocaleString("zh-CN");
        ⚠ 不能用 realCoord 判定 —— 它只表示「坐标经核实」，内置数据点
        （c- 前缀，命中 data-coords.js 快照）也全部带此标记，
        用它等于把全部内置点判成用户点（实测地图出现 158 个图标）；
-     · 路线首尾点例外显示（起/终徽章必须在地图上可见）；
-     · REVEAL_IDS：点击 Day 卡临时揭示的当天点位。
+     · 路线首尾点例外显示 → v17.1 升级：整条生效路线 + 每日规划的全部
+       地点（planDayIds，含各晚酒店）一律上图 —— 「地图展示完整的路线
+       图标，每日规划的每一个地点都能链接底图图标」；
+     · REVEAL_IDS：点击 Day 卡聚焦当天点位（高亮环 + 飞行定位）。
 ================================================================ */
 const USER_ADDED = new Set();     /* 用户显式采用过的点位（搜索/导入/粘贴） */
 let REVEAL_IDS = new Set();       /* 点击每日行程临时显示的点位 */
@@ -1703,6 +1709,24 @@ function isUserPoint(p){
   if(p.live || String(p.id||"").indexOf("am-")===0) return true;
   if(USER_ADDED.has(p.id)) return true;
   if((state.planMode||state.viewingPlan) && (state.planOrder||[]).indexOf(p.id)>=0) return true;
+  return false;
+}
+/* v17.1：每日规划的全部点位集合（各天行程点 + 当晚酒店）——
+   「每日规划的每一个地点都能链接底图图标」：日程里出现的点一律上图，
+   即使不在当前路线里（如被移出路线但仍在日程中的点） */
+function planDayIds(){
+  const s=new Set();
+  (LAST_DAYS||[]).forEach(d=>{ (dayIdsOf(d)||[]).forEach(id=>{ if(id) s.add(id); }); });
+  return s;
+}
+/* v17.1 统一可见性：导入/搜索用户点 ∪ 整条生效路线（不再只有首尾）
+   ∪ 每日规划全部地点 ∪ 聚焦揭示点 */
+function isShownPoint(p, onRoute, dayIds){
+  if(!p) return false;
+  if(isUserPoint(p)) return true;
+  if(onRoute && onRoute.has(p.id)) return true;
+  if(dayIds && dayIds.has(p.id)) return true;
+  if(REVEAL_IDS.has(p.id)) return true;
   return false;
 }
 
@@ -1948,13 +1972,14 @@ function buildMarkers(){
   map.markers={};
   /* 超预算集合一次算清，避免逐点重算（v12.0） */
   const ob=(typeof overBudgetInfo==="function")?overBudgetInfo():{set:new Set(),reason:new Map()};
-  /* v17.0：路线首尾点必须可见（起/终徽章挂在上面），即使不是导入点 */
+  /* v17.1：显示 = 导入/搜索用户点 ∪ 整条生效路线 ∪ 每日规划全部地点 ∪ 聚焦揭示点；
+     其余（数据库内置点）不上图 —— 首尾起/终徽章随路线自然可见 */
   const route=activeRoute();
-  const endpoints=new Set(route.length>=1?[route[0],route[route.length-1]]:[]);
+  const onRoute=new Set(route);
+  const dayIds=planDayIds();
+  dayIds.forEach(id=>onRoute.add(id));
   CUR_POIS.forEach(p=>{
-    /* v17.0 显示规则：导入/搜索/规划中的点 + 路线首尾 + 当天聚焦揭示的点；
-       其余（数据库内置点）默认不上图 —— 点击每日行程可临时查看 */
-    if(!isUserPoint(p) && !endpoints.has(p.id) && !REVEAL_IDS.has(p.id)) return;
+    if(!isShownPoint(p, onRoute, dayIds)) return;
     const m=document.createElement("div");
     /* 非本地（跨城搜到的）地点：图标虚线边框 + 「非本地」角标 */
     const isOver=ob.set.has(p.id);
@@ -1975,14 +2000,16 @@ function activeRoute(){
   const ids=(state.planMode||state.viewingPlan)?state.planOrder:BASE_ROUTE;
   return ids.filter(id=>poiOf(id));
 }
-/* v17.0：可见点位集合变化时才重建图标（避免无谓重建丢掉 selected 态）
-   —— loadProv 里 buildMarkers 先于 refreshBase 执行（路线尚空），首尾点图标
-   会漏建；规划模式进出（planOrder 变化）同样影响可见集。此函数在
-   renderTimeline / renderPlanItinerary 末尾兜底。 */
+/* v17.1：可见点位集合变化时才重建图标（避免无谓重建丢掉 selected 态）
+   —— loadProv 里 buildMarkers 先于 refreshBase/renderTimeline 执行（路线与
+   日程尚空），点位图标会漏建；规划模式进出、日程变化同样影响可见集。
+   此函数在 renderTimeline / renderPlanItinerary 末尾兜底。 */
 function ensureMarkerSet(){
   const route=activeRoute();
-  const endpoints=new Set(route.length>=1?[route[0],route[route.length-1]]:[]);
-  const want=new Set(CUR_POIS.filter(p=>isUserPoint(p)||endpoints.has(p.id)||REVEAL_IDS.has(p.id)).map(p=>p.id));
+  const onRoute=new Set(route);
+  const dayIds=planDayIds();
+  dayIds.forEach(id=>onRoute.add(id));
+  const want=new Set(CUR_POIS.filter(p=>isShownPoint(p, onRoute, dayIds)).map(p=>p.id));
   const have=new Set(Object.keys(map.markers));
   if(want.size===have.size && [...want].every(id=>have.has(id))) return;
   buildMarkers();
@@ -3790,7 +3817,7 @@ function renderTimeline(){
   const roomNote=days.roomInsufficient?`<div class="base-note warn-line">🏨 当前房费预算（${fmt(state.roomBudget)}/晚）下无可用住宿，最低需 ${fmt(days.roomFloor)}/晚 —— 请提高房费预算</div>`:"";
   box.innerHTML=roomNote+`<div class="base-note">${gradeNote}　·　总花费已硬压在总预算内（超支时优先降级餐饮，景点尽量保留）</div>`
     + dayCardsHtml(days,{})
-    + `<div class="empty-tl" style="border:none">🗺 地图默认只显示导入/搜索生成的地点 · 点击上方 <b>Day 卡片标题</b> 可在地图定位当天地点（含住宿）· 🟡 黄线按当日顺序连接 · 起点/终点带绿/红标签与序号 · 点击「自己规划」可增删</div>`;
+    + `<div class="empty-tl" style="border:none">🗺 地图显示完整路线与每日规划的全部地点（含各晚住宿）· 点击上方 <b>Day 卡片标题</b> 可高亮定位当天地点 · 🟡 黄线按当日顺序连接 · 起点/终点带绿/红标签与序号 · 点击「自己规划」可增删</div>`;
   refreshBase();
   ensureMarkerSet();                                /* v17.0：路线首尾/可见集兜底重建 */
   updateRouteClasses();
