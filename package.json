@@ -9,6 +9,8 @@
   "scripts": {
     "sync": "node sync-index.cjs",
     "check": "node sync-index.cjs --check",
+    "start": "node server.js",
+    "serve": "node sync-index.cjs && node server.js",
     "dev": "edgeone makers dev",
     "deploy": "edgeone makers deploy"
   }
