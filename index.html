@@ -214,6 +214,24 @@ mark.hl{background:rgba(224,168,0,.28);color:inherit;border-radius:3px;padding:0
 .marker.selected:hover{--s:1.6}
 .marker .badge{position:absolute;top:-8px;right:-8px;background:#fff;color:var(--red);font-size:10.5px;font-weight:700;width:17px;height:17px;border-radius:50%;display:none;align-items:center;justify-content:center;box-shadow:0 1px 4px rgba(0,0,0,.3);font-family:var(--sans)}
 .marker.selected .badge{display:flex}
+/* ---- v17.0 路线起终点与序号 ---- */
+.marker.on-route .badge{display:flex;background:#fff;color:var(--ink);border:1px solid rgba(0,0,0,.08)}
+.marker.rt-start .badge{background:var(--green);color:#fff;border-color:transparent}
+.marker.rt-end .badge{background:var(--red);color:#fff;border-color:transparent}
+.marker .rt-chip{position:absolute;top:-32px;left:50%;transform:translateX(-50%);font-size:10px;font-weight:700;line-height:1;padding:3.5px 9px;border-radius:9px;white-space:nowrap;font-style:normal;pointer-events:none;box-shadow:0 1px 5px rgba(0,0,0,.35);z-index:2;font-family:var(--sans)}
+.marker .rt-chip.rt-start{background:var(--green);color:#fff}
+.marker .rt-chip.rt-end{background:var(--red);color:#fff}
+.marker .rt-chip.rt-both{background:var(--ink,#1f2733);color:#fff}
+/* ---- v17.0 每日聚焦（点击 Day 卡头 → 地图定位并高亮当天点位） ---- */
+.marker.day-focus{box-shadow:0 0 0 4px rgba(43,122,120,.22),0 4px 14px rgba(0,0,0,.35);z-index:18}
+.marker.day-focus::before{content:"";position:absolute;inset:-8px;border-radius:50%;border:2px dashed rgba(43,122,120,.6);animation:dayPulse 1.6s ease-in-out infinite;pointer-events:none}
+@keyframes dayPulse{0%,100%{transform:scale(1);opacity:.9}50%{transform:scale(1.14);opacity:.4}}
+.day-card h3{cursor:pointer;user-select:none}
+.day-card h3:hover .dnum{background:var(--green,#2b7a78)}
+.day-card h3 .day-loc{margin-left:auto;flex:0 0 auto;font-size:12px;color:var(--muted);font-weight:600;opacity:.7;transition:opacity .2s ease,color .2s ease}
+.day-card h3:hover .day-loc{opacity:1;color:var(--green,#2b7a78)}
+.day-card.day-on{border:1.5px solid rgba(43,122,120,.5);box-shadow:0 3px 16px rgba(43,122,120,.18)}
+.day-card.day-on h3 .day-loc{color:var(--green,#2b7a78);opacity:1}
 .map-btns{position:absolute;right:10px;bottom:14px;z-index:40;display:flex;flex-direction:column;gap:8px}
 .map-btns button{width:36px;height:36px;border-radius:10px;background:#fff;box-shadow:0 2px 8px rgba(0,0,0,.18);font-size:18px;color:#333;transition:background .2s}
 .map-btns button:hover{background:#f2f2ee}
@@ -1656,11 +1674,44 @@ const state = {
 const $ = id => document.getElementById(id);
 const fmt = n => "¥" + Math.round(n).toLocaleString("zh-CN");
 
+/* ================================================================
+   v17.0 地图「仅导入点」显示模式 + 每日聚焦
+   ----------------------------------------------------------------------------
+   需求：
+     ① 地图默认只显示「导入 / 搜索生成」的图标，数据库内置点隐藏；
+     ② 搜索结果点立即可见（生成新点）；
+     ③ 点击每日行程卡片 → 地图飞到当天点位并临时显示 / 高亮；
+     ④ 颜色分类不变（绿=景点 蓝=住宿 紫=美食）；
+     ⑤ 路线规划区分起点 / 终点（徽章 + 悬浮标签）。
+   实现口径：
+     · USER_ADDED：本会话内经「搜索 / AI 导入 / 粘贴」采用的点位 id 集合
+       （含导入命中本地库的点 —— 它们没有 live 标记，必须显式登记）；
+     · isUserPoint：live / am- 前缀（搜索与缓存生成的用户点）或
+       USER_ADDED 或当前规划（planMode/viewingPlan 的 planOrder）中的点；
+       ⚠ 不能用 realCoord 判定 —— 它只表示「坐标经核实」，内置数据点
+       （c- 前缀，命中 data-coords.js 快照）也全部带此标记，
+       用它等于把全部内置点判成用户点（实测地图出现 158 个图标）；
+     · 路线首尾点例外显示（起/终徽章必须在地图上可见）；
+     · REVEAL_IDS：点击 Day 卡临时揭示的当天点位。
+================================================================ */
+const USER_ADDED = new Set();     /* 用户显式采用过的点位（搜索/导入/粘贴） */
+let REVEAL_IDS = new Set();       /* 点击每日行程临时显示的点位 */
+let FOCUS_DAY = -1;               /* 当前聚焦的 Day 序号（-1 = 无） */
+let LAST_DAYS = [];               /* 最近一次渲染的日程数组（供 Day 点击取点位） */
+function isUserPoint(p){
+  if(!p) return false;
+  if(p.live || String(p.id||"").indexOf("am-")===0) return true;
+  if(USER_ADDED.has(p.id)) return true;
+  if((state.planMode||state.viewingPlan) && (state.planOrder||[]).indexOf(p.id)>=0) return true;
+  return false;
+}
+
 let CUR_POIS = [];
 let CUR_CITY = null;                 // 城市级目的地时的城市对象
 function featuredCities(){ return PROVINCES[state.provKey].cities.filter(c=>c.featured); }
 function refreshScope(){
   CUR_POIS = []; CUR_CITY = null;
+  REVEAL_IDS = new Set(); FOCUS_DAY = -1; LAST_DAYS = [];   /* v17.0：作用域切换 → 清除每日聚焦 */
   const prov = PROVINCES[state.provKey];
   if(state.destType==="city"){
     const city = prov ? prov.cities.find(c=>c.key===state.cityKey) : null;
@@ -1897,11 +1948,18 @@ function buildMarkers(){
   map.markers={};
   /* 超预算集合一次算清，避免逐点重算（v12.0） */
   const ob=(typeof overBudgetInfo==="function")?overBudgetInfo():{set:new Set(),reason:new Map()};
+  /* v17.0：路线首尾点必须可见（起/终徽章挂在上面），即使不是导入点 */
+  const route=activeRoute();
+  const endpoints=new Set(route.length>=1?[route[0],route[route.length-1]]:[]);
   CUR_POIS.forEach(p=>{
+    /* v17.0 显示规则：导入/搜索/规划中的点 + 路线首尾 + 当天聚焦揭示的点；
+       其余（数据库内置点）默认不上图 —— 点击每日行程可临时查看 */
+    if(!isUserPoint(p) && !endpoints.has(p.id) && !REVEAL_IDS.has(p.id)) return;
     const m=document.createElement("div");
     /* 非本地（跨城搜到的）地点：图标虚线边框 + 「非本地」角标 */
     const isOver=ob.set.has(p.id);
-    m.className="marker cat-"+p.cat+(p.foreign?" foreign":"")+(p.dropped?" dim":"")+(isOver?" over-budget":"");
+    m.className="marker cat-"+p.cat+(p.foreign?" foreign":"")+(p.dropped?" dim":"")+(isOver?" over-budget":"")
+      +(REVEAL_IDS.has(p.id)?" day-focus":"");       /* v17.0：当天聚焦点带高亮环 */
     m.innerHTML=`<span>${p.cat==="sight"?"⛰":p.cat==="food"?"🍜":"🛏"}</span><span class="badge"></span>`
       +(p.foreign?'<em class="mk-far">非本地</em>':"")
       +(p.lowConf?'<em class="mk-far" style="top:auto;bottom:-16px;background:var(--yellow)">? 待确认</em>':"")
@@ -1910,16 +1968,51 @@ function buildMarkers(){
     map.markers[p.id]=m; map.el.appendChild(m);
   });
   map.render();
+  updateBadges();      /* v17.0：重建 DOM 后立即恢复路线序号（旧版只在规划模式用到，现在全模式编号） */
 }
 /* 当前生效路线：规划模式/已保存方案 → 自选顺序；否则 → 系统推荐路线 */
 function activeRoute(){
   const ids=(state.planMode||state.viewingPlan)?state.planOrder:BASE_ROUTE;
   return ids.filter(id=>poiOf(id));
 }
-/* 图标尺寸层级：路线上的点放大到 1.25x */
+/* v17.0：可见点位集合变化时才重建图标（避免无谓重建丢掉 selected 态）
+   —— loadProv 里 buildMarkers 先于 refreshBase 执行（路线尚空），首尾点图标
+   会漏建；规划模式进出（planOrder 变化）同样影响可见集。此函数在
+   renderTimeline / renderPlanItinerary 末尾兜底。 */
+function ensureMarkerSet(){
+  const route=activeRoute();
+  const endpoints=new Set(route.length>=1?[route[0],route[route.length-1]]:[]);
+  const want=new Set(CUR_POIS.filter(p=>isUserPoint(p)||endpoints.has(p.id)||REVEAL_IDS.has(p.id)).map(p=>p.id));
+  const have=new Set(Object.keys(map.markers));
+  if(want.size===have.size && [...want].every(id=>have.has(id))) return;
+  buildMarkers();
+}
+/* 图标尺寸层级：路线上的点放大到 1.25x
+   v17.0：同时挂「起点 / 终点」徽章 —— 首点绿色「起」、末点红色「终」，
+   单点路线显示「起·终」；徽章挂在 marker 上，随地图重绘自动重建 */
 function updateRouteClasses(){
-  const on=new Set(activeRoute());
-  for(const id in map.markers) map.markers[id].classList.toggle("on-route", on.has(id));
+  const route=activeRoute();
+  const on=new Set(route);
+  for(const id in map.markers){
+    const m=map.markers[id];
+    m.classList.toggle("on-route", on.has(id));
+    m.classList.remove("rt-start","rt-end");
+    const old=m.querySelector(".rt-chip"); if(old) old.remove();
+  }
+  if(!route.length) return;
+  const setChip=(id,cls,txt)=>{
+    const m=map.markers[id]; if(!m) return;
+    m.classList.add(cls);
+    const c=document.createElement("em");
+    c.className="rt-chip "+(route.length===1?"rt-both":cls);
+    c.textContent=txt;
+    m.appendChild(c);
+  };
+  if(route.length===1){ setChip(route[0],"rt-start","起·终"); }
+  else{
+    setChip(route[0],"rt-start","起点");
+    setChip(route[route.length-1],"rt-end","终点");
+  }
 }
 function drawLines(left,top){
   const svg=map.lines;
@@ -2109,8 +2202,11 @@ function externalMatches(q){
   /* 名称命中优先，截断 */
   return out.filter(p=>p.name.toLowerCase().includes(ql)).slice(0,10);
 }
-/* 把外部 / 自定义地点注册进当前地图作用域（与已有地点完全等价） */
+/* 把外部 / 自定义地点注册进当前地图作用域（与已有地点完全等价）
+   v17.0：凡经此入口（搜索点选 / 缓存命中 / 导入落地 / 方案重建）采用的点
+   一律登记为「用户点」—— 保证地图「仅显示导入点」模式下立即可见 */
 function registerExtraPoi(p){
+  if(p && p.id) USER_ADDED.add(p.id);
   if(poiOf(p.id)) return p;
   CUR_POIS.push(p);
   buildMarkers();
@@ -2578,11 +2674,73 @@ if(psInput){
 }
 
 function updateBadges(){
-  /* 先清空所有编号：编号仅在「自己规划」模式下显示，退出后不得残留 */
+  /* 先清空所有编号（退出后不得残留），再按当前生效路线统一编号
+     v17.0：推荐路线 / 规划模式 / 已存方案 一律编号 —— 路线上点的先后顺序一目了然 */
   Object.values(map.markers).forEach(m=>{ const b=m.querySelector(".badge"); if(b) b.textContent=""; });
-  if(!state.planMode) return;
-  state.planOrder.forEach((id,i)=>{ if(map.markers[id]) map.markers[id].querySelector(".badge").textContent=i+1; });
+  activeRoute().forEach((id,i)=>{
+    const m=map.markers[id]; if(!m) return;
+    const b=m.querySelector(".badge"); if(b) b.textContent=i+1;
+  });
 }
+
+/* ================================================================
+   v17.0 每日聚焦：点击 Day 卡头 → 地图飞到当天点位 + 临时显示 / 高亮
+   ----------------------------------------------------------------------------
+   · 点同一个 Day → 取消聚焦（临时揭示的内置点重新隐藏，导入点不受影响）
+   · 点另一个 Day → 切换聚焦
+   · 地图按当天点位包围盒自适应缩放（含当晚酒店）
+   · 揭示的点位带虚线脉冲高亮环（.day-focus）
+================================================================ */
+function dayIdsOf(d){
+  const ids=[];
+  (d.items||[]).forEach(it=>{ if(it.poi) ids.push(it.poi); });
+  if(d.hotel && d.hotel.id) ids.push(d.hotel.id);
+  return ids;
+}
+function toggleDayFocus(i){
+  const days=LAST_DAYS||[];
+  if(i<0 || i>=days.length){ return; }
+  if(FOCUS_DAY===i){                       /* 再点一次 → 取消聚焦 */
+    FOCUS_DAY=-1; REVEAL_IDS=new Set();
+    buildMarkers(); applyDayCardActive();
+    toast("已收起 Day "+(i+1)+" 的地图点位");
+    return;
+  }
+  FOCUS_DAY=i;
+  REVEAL_IDS=new Set(dayIdsOf(days[i]));
+  buildMarkers(); applyDayCardActive();
+  flyToDay(days[i]);
+  toast("📍 Day "+(i+1)+" · 已在地图定位 "+REVEAL_IDS.size+" 个当天地点（含当晚住宿）");
+}
+/* 按当天点位包围盒自适应飞行（Web 墨卡托近似：世界宽 = 256·2^z px / 360°） */
+function flyToDay(d){
+  const pts=[];
+  dayIdsOf(d).forEach(id=>{ const p=poiOf(id); if(p) pts.push([p.x,p.y]); });
+  if(!pts.length) return;
+  let minX=1/0,maxX=-1/0,minY=1/0,maxY=-1/0;
+  pts.forEach(([x,y])=>{ if(x<minX)minX=x; if(x>maxX)maxX=x; if(y<minY)minY=y; if(y>maxY)maxY=y; });
+  const cx=(minX+maxX)/2, cy=(minY+maxY)/2;
+  const spanX=Math.max(maxX-minX,1e-4), spanY=Math.max(maxY-minY,1e-4);
+  const W=(map.W||900)*0.72, H=(map.H||700)*0.66;
+  const zX=Math.log2((W*360)/(256*spanX)), zY=Math.log2((H*360)/(256*spanY));
+  let z=Math.floor(Math.min(zX,zY));
+  if(!isFinite(z)) z=12;
+  z=Math.max(5,Math.min(15,z));
+  map.flyTo(cx,cy,z,620);
+}
+/* Day 卡聚焦态样式（innerHTML 重渲染后需重放） */
+function applyDayCardActive(){
+  document.querySelectorAll("#timeline .day-card[data-day]").forEach(c=>{
+    c.classList.toggle("day-on", FOCUS_DAY>=0 && +c.dataset.day===FOCUS_DAY);
+  });
+}
+/* Day 卡头点击（事件委托：渲染任意次数都有效） */
+$("timeline").addEventListener("click",e=>{
+  const h=e.target.closest && e.target.closest(".day-card h3");
+  if(!h) return;
+  const card=h.closest(".day-card");
+  if(card && card.dataset && card.dataset.day!==undefined) toggleDayFocus(+card.dataset.day);
+});
 
 /* ================================================================
    自己规划模式
@@ -2782,19 +2940,21 @@ function renderPlanItinerary(){
   const box=$("timeline");
   const order=(state.planOrder||[]).filter(id=>poiOf(id));
   if(!order.length){
+    LAST_DAYS=[];                                    /* v17.0 */
     /* 清空后：仅有天数框架、地点待选 */
     const n=Math.max(1,state.days);
     let html="";
     for(let i=0;i<n;i++){
-      html+=`<div class="day-card"><h3><span class="dnum">${i+1}</span>Day ${i+1} · 地点待选</h3>
+      html+=`<div class="day-card" data-day="${i}"><h3><span class="dnum">${i+1}</span>Day ${i+1} · 地点待选<span class="day-loc">📍 地图</span></h3>
         <div class="tl-item"><span class="t">—</span><span class="nm" style="color:var(--muted)">在左侧地图点击地点即可加入当天行程</span></div>
         <div class="stay-line"><span>🛏 当晚酒店 <span class="hname">待选定</span></span><b>—</b></div>
         <div class="day-foot"><span>💰 当日预估</span><span class="day-cost">—</span></div></div>`;
     }
     box.innerHTML=`<div class="base-note">🧹 当前为空白规划 · ${n} 天的天数框架已保留，请在左侧地图逐个点选地点；预算保持 <b>${fmt(state.budget)}</b> 不变</div>`+html;
-    updateBottomBar(); syncArrivalLink(); return;
+    updateBottomBar(); syncArrivalLink(); applyDayCardActive(); return;
   }
   const days=planDaysFromOrder();
+  LAST_DAYS=days;                                    /* v17.0 */
   const autoSet=new Set(state.autoFilled||[]);
   const baseSet=new Set(BASE_ROUTE);
   const added=order.filter(id=>!baseSet.has(id)).length;
@@ -2806,6 +2966,7 @@ function renderPlanItinerary(){
     <span class="mini">点位累计约 ${fmt(cost)} / 人（不含往返大交通与接驳）</span></div>`
     +(fold?`<div class="base-note warn-line">🔀 当前路线存在折返，建议调整顺序（点击已选点可取消后重选，不强制）</div>`:"")
     + dayCardsHtml(days,{autoSet:autoSet,planMode:true});
+  ensureMarkerSet();                                /* v17.0：规划集变化 → 兜底重建图标 */
   updateBottomBar();
   syncArrivalLink();                /* ← 首晚酒店若变更 → 重规划并重绘接驳 */
 }
@@ -3596,7 +3757,7 @@ function dayCardsHtml(days, opt){
     const dayCost=(d.hotel?d.hotel.econ:0)+d.items.reduce((s,it)=>{
       const p=it.poi?poiOf(it.poi):null; return s+((p&&p.cat!=="hotel")?p.econ:0);
     },0);
-    return `<div class="day-card"><h3><span class="dnum">${i+1}</span>Day ${i+1} · ${d.title}</h3>
+    return `<div class="day-card" data-day="${i}"><h3 title="点击在地图上定位当天地点"><span class="dnum">${i+1}</span>Day ${i+1} · ${d.title}<span class="day-loc">📍 地图</span></h3>
       ${d.clusterNote?`<div class="cluster-note">${d.clusterNote}</div>`:""}
       ${d.arriveNote?`<div class="arr-tag">🛬 ${d.arriveNote}</div>`:""}
       ${rows}
@@ -3615,11 +3776,13 @@ function renderTimeline(){
     $("arrivalBox").classList.remove("show"); $("arrBody").innerHTML="";
     $("arrPointBox").classList.remove("show"); $("conflictNote").classList.remove("show");
     $("dayMeta").classList.remove("show");
+    LAST_DAYS=[];                                    /* v17.0 */
     updateBottomBar(); return;
   }
   if(state.planMode || state.viewingPlan){ renderPlanItinerary(); return; }
   const days=plannedDays();
-  if(!days.length){ box.innerHTML='<div class="empty-tl">该目的地暂无可编排地点</div>'; updateBottomBar(); return; }
+  if(!days.length){ LAST_DAYS=[]; box.innerHTML='<div class="empty-tl">该目的地暂无可编排地点</div>'; updateBottomBar(); applyDayCardActive(); return; }
+  LAST_DAYS=days;                                    /* v17.0：供 Day 卡点击取当天点位 */
   const pass=costPass(days);
   const grades=days.combo||{s:0,f:0,h:0};
   const hName=days[0]&&days[0].hotel&&days[0].hotel.tier!==undefined?HTIER_NAME[HTIER_ORDER[days[0].hotel.tier]]:"—";
@@ -3627,11 +3790,13 @@ function renderTimeline(){
   const roomNote=days.roomInsufficient?`<div class="base-note warn-line">🏨 当前房费预算（${fmt(state.roomBudget)}/晚）下无可用住宿，最低需 ${fmt(days.roomFloor)}/晚 —— 请提高房费预算</div>`:"";
   box.innerHTML=roomNote+`<div class="base-note">${gradeNote}　·　总花费已硬压在总预算内（超支时优先降级餐饮，景点尽量保留）</div>`
     + dayCardsHtml(days,{})
-    + `<div class="empty-tl" style="border:none">🟡 黄色路线已按当日顺序连接上述地点（含到达接驳段）· 必选热点 + 地理聚类，同日任意两点 ≤10km · 时刻为按到达时间推算 ⏳ · 点击「自己规划」可增删</div>`;
+    + `<div class="empty-tl" style="border:none">🗺 地图默认只显示导入/搜索生成的地点 · 点击上方 <b>Day 卡片标题</b> 可在地图定位当天地点（含住宿）· 🟡 黄线按当日顺序连接 · 起点/终点带绿/红标签与序号 · 点击「自己规划」可增删</div>`;
   refreshBase();
+  ensureMarkerSet();                                /* v17.0：路线首尾/可见集兜底重建 */
   updateRouteClasses();
   map.render();
   updateBottomBar();
+  applyDayCardActive();                            /* v17.0：重渲染后恢复 Day 卡聚焦态 */
   syncArrivalLink();                /* ← 首晚酒店若随预算重算变更 → 重规划并重绘接驳 */
 }
 function updateDayMeta(){
@@ -4951,6 +5116,7 @@ function pasteGenerate(){
     });
     buildMarkers();                                  /* 低置信度点的「?」标记上图 */
     PASTE_ORDER=uniq.map(o=>o.p.id);
+    PASTE_ORDER.forEach(id=>USER_ADDED.add(id));     /* v17.0：粘贴采用的点（含本地库命中）登记为用户点 */
     if(!PASTE_ORDER.length){
       box.innerHTML='<div class="paste-note bad">未从文本中识别到有效地点 · 已切出 '+tokens.length+' 个候选词，但本地库与高德均未命中有效 POI，请换一段文本或补充具体名称</div>';
       return;
@@ -6031,6 +6197,8 @@ function aiReplacePlan(items){
     const pp=p || poiOf(it.id);
     if(pp) ids.push(pp.id);
   });
+  /* v17.0：导入命中的本地库点也要登记为用户点（它们没有 live 标记） */
+  ids.forEach(id=>USER_ADDED.add(id));
   /* ③ 只保留识别结果（与普通点完全等价：可编辑、增删、参与预算与接驳） */
   state.planOrder=ids.slice();
   state.autoFilled=[];
